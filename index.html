@@ -221,6 +221,12 @@
     <div class="flex justify-between text-lg font-bold mb-4 pt-3 border-t border-[var(--line)]">
       <span>Total</span><span id="cartModalTotal">R$ 0,00</span>
     </div>
+    <p class="text-sm text-[var(--txt-dim)] mb-2">Como você quer receber?</p>
+    <div class="flex gap-2 mb-3">
+      <button id="btnRetirada" onclick="setDeliveryType('retirada')" class="chip chip-active flex-1 text-center"><i class="fa-solid fa-store mr-1"></i>Retirar no balcão</button>
+      <button id="btnEntrega" onclick="setDeliveryType('entrega')" class="chip flex-1 text-center"><i class="fa-solid fa-motorcycle mr-1"></i>Entrega</button>
+    </div>
+    <input id="cartAddress" class="input mb-3 hide" placeholder="Endereço completo para entrega">
     <button onclick="submitOrder()" class="btn-gold w-full py-3 rounded-xl mb-2">Confirmar Pedido</button>
     <button onclick="closeCart()" class="w-full py-3 rounded-xl card-2">Continuar comprando</button>
   </div>
@@ -251,6 +257,8 @@
 
     <!-- CAIXA -->
     <div id="caixaCard" class="card p-4 mb-5"></div>
+
+    <div id="aguardandoConfirmBox" class="mb-5"></div>
 
     <div class="grid grid-cols-2 gap-3 mb-5">
       <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Agendamentos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiAgendHoje">0</p></div>
@@ -417,6 +425,8 @@ let userProfile = {};
 let authMode = "login";
 let services = [], barbers = [], catalogItems = [], appointments = [], orders = [], allUsers = {};
 let caixaAtual = null;
+let firstOrdersSnapshot = true;
+let firstApptsSnapshot = true;
 let cart = []; // [{itemId, name, price, qty}]
 let booking = { serviceId:null, barberId:null, date:null, time:null };
 let meusTab = "agend";
@@ -552,6 +562,7 @@ function initClientListeners(){
 }
 
 function initAdminListeners(){
+  requestNotificationPermission();
   db.collection('services').onSnapshot(s=>{
     services = s.docs.map(d=>({id:d.id, ...d.data()}));
     renderAdminServices();
@@ -565,12 +576,30 @@ function initAdminListeners(){
     renderAdminCatalog();
   });
   db.collection('appointments').onSnapshot(s=>{
+    if(!firstApptsSnapshot){
+      s.docChanges().forEach(change=>{
+        if(change.type==='added' && change.doc.data().source==='cliente'){
+          const a = change.doc.data();
+          notifyNovo('Novo agendamento!', `${a.clientName} · ${a.serviceName} em ${fmtDateBR(a.date)} às ${a.time}`);
+        }
+      });
+    }
     appointments = s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> (a.date+a.time) < (b.date+b.time) ? 1 : -1);
     renderDashboard(); renderAdminAgenda();
+    firstApptsSnapshot = false;
   });
   db.collection('orders').onSnapshot(s=>{
+    if(!firstOrdersSnapshot){
+      s.docChanges().forEach(change=>{
+        if(change.type==='added' && change.doc.data().source!=='balcao'){
+          const o = change.doc.data();
+          notifyNovo('Novo pedido!', `${o.clientName} · ${fmtBRL(o.total)}`);
+        }
+      });
+    }
     orders = s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
     renderDashboard();
+    firstOrdersSnapshot = false;
   });
   db.collection('users').onSnapshot(s=>{
     allUsers = {}; s.docs.forEach(d=> allUsers[d.id] = d.data());
@@ -880,8 +909,17 @@ function renderCartModal(){
   const total = cart.reduce((s,c)=>s+c.qty*c.price,0);
   document.getElementById('cartModalTotal').textContent = fmtBRL(total);
 }
+let deliveryType = 'retirada';
+function setDeliveryType(type){
+  deliveryType = type;
+  document.getElementById('btnRetirada').classList.toggle('chip-active', type==='retirada');
+  document.getElementById('btnEntrega').classList.toggle('chip-active', type==='entrega');
+  document.getElementById('cartAddress').classList.toggle('hide', type!=='entrega');
+}
 async function submitOrder(){
   if(cart.length===0){ toast('Seu carrinho está vazio.', 'err'); return; }
+  const address = document.getElementById('cartAddress').value.trim();
+  if(deliveryType==='entrega' && !address){ toast('Informe o endereço para entrega.', 'err'); return; }
   const total = cart.reduce((s,c)=>s+c.qty*c.price,0);
   try{
     await db.collection('orders').add({
@@ -890,9 +928,12 @@ async function submitOrder(){
       clientPhone: userProfile.phone || '',
       items: cart.map(c=>({itemId:c.itemId, name:c.name, price:c.price, qty:c.qty})),
       total, status:'aguardando',
+      deliveryType, address: deliveryType==='entrega' ? address : '',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     cart = [];
+    setDeliveryType('retirada');
+    document.getElementById('cartAddress').value = '';
     updateCartBar(); closeCart();
     toast('Pedido enviado!');
     goTo('meus'); setMeusTab('ped');
@@ -931,6 +972,7 @@ function renderMeusPedidos(){
         ${statusPillOrder(o.status)}
       </div>
       <p class="text-xs text-[var(--txt-dim)]">${o.items.map(i=>`${i.qty}x ${i.name}`).join(', ')}</p>
+      ${o.deliveryType==='entrega'?`<p class="text-xs text-[var(--gold)] mt-1"><i class="fa-solid fa-motorcycle mr-1"></i>Entrega: ${o.address||''}</p>`:''}
     </div>`).join('');
 }
 
@@ -973,6 +1015,60 @@ function renderDashboard(){
 
   renderCaixaCard();
   renderTopProducts();
+  renderAguardandoConfirmacao();
+}
+
+// ---------------- AGUARDANDO CONFIRMAÇÃO (independente da data filtrada na Agenda) ----------------
+function renderAguardandoConfirmacao(){
+  const box = document.getElementById('aguardandoConfirmBox');
+  if(!box) return;
+  const pendentes = appointments.filter(a=>a.status==='aguardando').sort((a,b)=> (a.date+a.time) < (b.date+b.time) ? -1 : 1);
+  if(pendentes.length===0){ box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="card p-4 border border-[var(--warn)]">
+      <p class="font-semibold text-sm mb-3"><i class="fa-solid fa-bell mr-2 text-[var(--warn)]"></i>${pendentes.length} agendamento(s) aguardando sua confirmação</p>
+      <div class="space-y-2">
+        ${pendentes.map(a=>`
+          <div class="card-2 p-3 flex items-center justify-between">
+            <div>
+              <p class="font-semibold text-sm">${fmtDateBR(a.date)} às ${a.time} · ${a.serviceName}</p>
+              <p class="text-xs text-[var(--txt-dim)]">${a.clientName} · ${a.barberName}${a.clientPhone?' · '+a.clientPhone:''}</p>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="updateApptStatus('${a.id}','andamento')" class="w-9 h-9 rounded-lg bg-[var(--ok)]/20 text-[var(--ok)] flex items-center justify-center"><i class="fa-solid fa-check"></i></button>
+              <button onclick="updateApptStatus('${a.id}','cancelado')" class="w-9 h-9 rounded-lg bg-[var(--danger)]/20 text-[var(--danger)] flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// ---------------- NOTIFICAÇÕES DE NOVO PEDIDO/AGENDAMENTO ----------------
+function requestNotificationPermission(){
+  if('Notification' in window && Notification.permission === 'default'){
+    Notification.requestPermission();
+  }
+}
+function playNotificationBeep(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    g.gain.setValueAtTime(0.18, ctx.currentTime);
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.setValueAtTime(1046, ctx.currentTime+0.15);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.5);
+    o.start(); o.stop(ctx.currentTime+0.5);
+  }catch(e){}
+}
+function notifyNovo(titulo, corpo){
+  playNotificationBeep();
+  toast(titulo+' '+corpo);
+  if('Notification' in window && Notification.permission === 'granted'){
+    try{ new Notification(titulo, {body: corpo, icon: LOGO_DATA_URI}); }catch(e){}
+  }
 }
 
 // ---------------- CAIXA (abrir/fechar, venda manual no balcão) ----------------
@@ -1154,7 +1250,7 @@ function adminAppointmentRow(a){
       <p class="font-semibold text-sm">${a.time} · ${a.serviceName}</p>
       <p class="text-xs text-[var(--txt-dim)]">${a.clientName} · ${a.barberName}</p>
     </div>
-    <select onchange="updateApptStatus('${a.id}', this.value)" class="input !w-auto text-xs py-1.5">
+    <select onchange="updateApptStatus('${a.id}', this.value, this)" class="input !w-auto text-xs py-1.5">
       <option value="aguardando" ${a.status==='aguardando'?'selected':''}>Aguardando</option>
       <option value="andamento" ${a.status==='andamento'?'selected':''}>Em andamento</option>
       <option value="concluido" ${a.status==='concluido'?'selected':''}>Concluído</option>
@@ -1163,13 +1259,15 @@ function adminAppointmentRow(a){
   </div>`;
 }
 function adminOrderRow(o){
+  const entregaLabel = o.deliveryType==='entrega' ? `<i class="fa-solid fa-motorcycle mr-1"></i>Entrega${o.address?': '+o.address:''}` : (o.deliveryType==='retirada' ? '<i class="fa-solid fa-store mr-1"></i>Retirada no balcão' : '');
   return `
   <div class="card p-3 flex items-center justify-between">
     <div>
       <p class="font-semibold text-sm">${o.clientName} · ${fmtBRL(o.total)}</p>
       <p class="text-xs text-[var(--txt-dim)]">${o.items.map(i=>`${i.qty}x ${i.name}`).join(', ')}</p>
+      ${entregaLabel?`<p class="text-xs text-[var(--gold)] mt-0.5">${entregaLabel}</p>`:''}
     </div>
-    <select onchange="updateOrderStatus('${o.id}', this.value)" class="input !w-auto text-xs py-1.5">
+    <select onchange="updateOrderStatus('${o.id}', this.value, this)" class="input !w-auto text-xs py-1.5">
       <option value="aguardando" ${o.status==='aguardando'?'selected':''}>Aguardando</option>
       <option value="preparo" ${o.status==='preparo'?'selected':''}>Em preparo</option>
       <option value="pronto" ${o.status==='pronto'?'selected':''}>Pronto</option>
@@ -1178,16 +1276,55 @@ function adminOrderRow(o){
     </select>
   </div>`;
 }
-async function updateApptStatus(id, status){
+// Senha exigida para cancelar agendamentos/pedidos — troque aqui por enquanto.
+// (Depois dá pra virar uma configuração editável pelo próprio admin dentro do painel.)
+const CANCEL_PASSWORD = '12345';
+function confirmCancelPassword(){
+  const pwd = prompt('Digite a senha de cancelamento:');
+  if(pwd === null) return false; // usuário cancelou o prompt
+  return pwd === CANCEL_PASSWORD;
+}
+async function updateApptStatus(id, status, selectEl){
+  const current = appointments.find(a=>a.id===id);
+  if(status === 'cancelado'){
+    if(!confirmCancelPassword()){
+      toast('Cancelamento não realizado (senha incorreta ou não informada).', 'err');
+      if(selectEl) selectEl.value = current?.status || 'aguardando';
+      return;
+    }
+  }
   const data = {status};
   if(status==='concluido') data.concluidoEm = firebase.firestore.FieldValue.serverTimestamp();
   await db.collection('appointments').doc(id).update(data);
   toast('Status atualizado!');
 }
-async function updateOrderStatus(id, status){
+async function updateOrderStatus(id, status, selectEl){
+  const order = orders.find(o=>o.id===id);
+  if(status === 'cancelado'){
+    if(!confirmCancelPassword()){
+      toast('Cancelamento não realizado (senha incorreta ou não informada).', 'err');
+      if(selectEl) selectEl.value = order?.status || 'aguardando';
+      return;
+    }
+  }
   const data = {status};
   if(status==='entregue') data.entregueEm = firebase.firestore.FieldValue.serverTimestamp();
   await db.collection('orders').doc(id).update(data);
+  // Se cancelado, devolve pro estoque os itens do catálogo vendidos nesse pedido
+  if(status === 'cancelado' && order && order.status !== 'cancelado'){
+    const batch = db.batch();
+    let temItemDeCatalogo = false;
+    (order.items||[]).forEach(it=>{
+      if(it.itemId){
+        const catalogItem = catalogItems.find(c=>c.id===it.itemId);
+        if(catalogItem){
+          temItemDeCatalogo = true;
+          batch.update(db.collection('catalogItems').doc(it.itemId), {stock: (catalogItem.stock||0) + (it.qty||1)});
+        }
+      }
+    });
+    if(temItemDeCatalogo) await batch.commit();
+  }
   toast('Status atualizado!');
 }
 
@@ -1442,13 +1579,13 @@ function openCatalogForm(i){
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <input id="fName" class="input" placeholder="Nome do item" value="${i?.name||''}">
-      <select id="fCategory" class="input">
-        <option value="jantinha" ${i?.category==='jantinha'?'selected':''}>Jantinha</option>
-        <option value="espetinho" ${i?.category==='espetinho'?'selected':''}>Espetinho</option>
-        <option value="bebida" ${i?.category==='bebida'?'selected':''}>Bebida</option>
-        <option value="conveniencia" ${i?.category==='conveniencia'?'selected':''}>Conveniência</option>
-        <option value="terere" ${i?.category==='terere'?'selected':''}>Tereré</option>
-      </select>
+      <div>
+        <label class="text-xs text-[var(--txt-dim)] block mb-1">Categoria</label>
+        <input id="fCategory" class="input" list="categoryOptions" placeholder="Ex: Jantinha, Bebida, Espetinho..." value="${i?.category||''}">
+        <datalist id="categoryOptions">
+          ${[...new Set(['jantinha','espetinho','bebida','conveniencia','terere', ...catalogItems.map(c=>c.category)])].map(c=>`<option value="${c}">${CAT_LABELS[c]||c}</option>`).join('')}
+        </datalist>
+      </div>
       <input id="fPrice" type="number" step="0.01" class="input" placeholder="Preço (R$)" value="${i?.price||''}">
       <div class="grid grid-cols-2 gap-2">
         <div>
@@ -1476,7 +1613,7 @@ function openCatalogForm(i){
 async function saveCatalogItem(){
   const data = {
     name: document.getElementById('fName').value.trim(),
-    category: document.getElementById('fCategory').value,
+    category: document.getElementById('fCategory').value.trim().toLowerCase() || 'outros',
     price: parseFloat(document.getElementById('fPrice').value)||0,
     stock: parseInt(document.getElementById('fStock').value)||0,
     stockMin: parseInt(document.getElementById('fStockMin').value)||0,
