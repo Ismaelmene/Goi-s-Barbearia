@@ -248,6 +248,10 @@
       <span><i class="fa-solid fa-download mr-2 text-[var(--gold)]"></i>Importar cardápio da Goiás Barbearia (1 clique)</span>
       <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
     </button>
+
+    <!-- CAIXA -->
+    <div id="caixaCard" class="card p-4 mb-5"></div>
+
     <div class="grid grid-cols-2 gap-3 mb-5">
       <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Agendamentos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiAgendHoje">0</p></div>
       <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Pedidos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiPedHoje">0</p></div>
@@ -257,8 +261,11 @@
     <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Agenda de hoje</h3>
     <div id="dashTodayList" class="space-y-2 mb-5"></div>
     <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Pedidos recentes</h3>
-    <div id="dashOrdersList" class="space-y-2"></div>
+    <div id="dashOrdersList" class="space-y-2 mb-5"></div>
+    <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Top 10 mais vendidos</h3>
+    <div id="topProductsList" class="space-y-2"></div>
   </section>
+
 
   <!-- ---------- AGENDA ---------- -->
   <section id="admin-agenda" class="hide px-5 pt-5 fade-in">
@@ -409,6 +416,7 @@ let userRole = null; // "client" | "admin"
 let userProfile = {};
 let authMode = "login";
 let services = [], barbers = [], catalogItems = [], appointments = [], orders = [], allUsers = {};
+let caixaAtual = null;
 let cart = []; // [{itemId, name, price, qty}]
 let booking = { serviceId:null, barberId:null, date:null, time:null };
 let meusTab = "agend";
@@ -566,6 +574,10 @@ function initAdminListeners(){
   });
   db.collection('users').onSnapshot(s=>{
     allUsers = {}; s.docs.forEach(d=> allUsers[d.id] = d.data());
+  });
+  db.collection('caixaSessions').where('status','==','aberto').limit(1).onSnapshot(s=>{
+    caixaAtual = s.empty ? null : {id: s.docs[0].id, ...s.docs[0].data()};
+    renderCaixaCard();
   });
   document.getElementById('agendaDateFilter').value = todayStr();
   goToAdmin('dashboard');
@@ -958,6 +970,181 @@ function renderDashboard(){
   const ordBox = document.getElementById('dashOrdersList');
   const recentOrders = orders.slice(0,6);
   ordBox.innerHTML = recentOrders.length ? recentOrders.map(o=>adminOrderRow(o)).join('') : `<p class="text-sm text-[var(--txt-dim)]">Nenhum pedido ainda.</p>`;
+
+  renderCaixaCard();
+  renderTopProducts();
+}
+
+// ---------------- CAIXA (abrir/fechar, venda manual no balcão) ----------------
+function renderCaixaCard(){
+  const box = document.getElementById('caixaCard');
+  if(!box) return;
+  if(!caixaAtual){
+    box.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="font-semibold text-sm"><i class="fa-solid fa-cash-register mr-2 text-[var(--txt-dim)]"></i>Caixa fechado</p>
+          <p class="text-xs text-[var(--txt-dim)]">Abra o caixa para lançar vendas do balcão.</p>
+        </div>
+        <button onclick="abrirCaixaPrompt()" class="btn-gold px-4 py-2 rounded-xl text-sm">Abrir Caixa</button>
+      </div>`;
+    return;
+  }
+  const abertura = caixaAtual.abertoEm?.toDate ? caixaAtual.abertoEm.toDate() : new Date();
+  const horaAbertura = abertura.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const vendasCaixa = calcularVendasCaixa();
+  box.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <p class="font-semibold text-sm text-[var(--ok)]"><i class="fa-solid fa-cash-register mr-2"></i>Caixa aberto desde ${horaAbertura}</p>
+        <p class="text-xs text-[var(--txt-dim)]">Abertura: ${fmtBRL(caixaAtual.valorAbertura)} · Vendas no caixa: ${fmtBRL(vendasCaixa)}</p>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="openLancarVenda()" class="btn-gold flex-1 py-2.5 rounded-xl text-sm"><i class="fa-solid fa-plus mr-1"></i>Lançar Venda</button>
+      <button onclick="fecharCaixaPrompt()" class="card-2 flex-1 py-2.5 rounded-xl text-sm">Fechar Caixa</button>
+    </div>`;
+}
+function calcularVendasCaixa(){
+  if(!caixaAtual) return 0;
+  const aberturaMs = caixaAtual.abertoEm?.toDate ? caixaAtual.abertoEm.toDate().getTime() : 0;
+  const vendasOrders = orders.filter(o=>{
+    if(o.status!=='entregue') return false;
+    const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
+    return t >= aberturaMs;
+  }).reduce((s,o)=>s+(o.total||0),0);
+  const vendasAppts = appointments.filter(a=>{
+    if(a.status!=='concluido') return false;
+    const t = a.concluidoEm?.toDate ? a.concluidoEm.toDate().getTime() : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
+    return t >= aberturaMs;
+  }).reduce((s,a)=>s+(a.price||0),0);
+  return vendasOrders + vendasAppts;
+}
+function abrirCaixaPrompt(){
+  editingType = 'abrir-caixa';
+  document.getElementById('genericModalTitle').textContent = 'Abrir Caixa';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <label class="text-xs text-[var(--txt-dim)]">Valor de abertura (troco inicial em caixa)</label>
+      <input id="valorAbertura" type="number" step="0.01" class="input" placeholder="Ex: 100.00" value="0">
+      <button onclick="confirmarAbrirCaixa()" class="btn-gold w-full py-3 rounded-xl mt-2">Abrir Caixa</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarAbrirCaixa(){
+  const valor = parseFloat(document.getElementById('valorAbertura').value)||0;
+  await db.collection('caixaSessions').add({
+    status:'aberto', valorAbertura: valor,
+    abertoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    abertoPor: currentUser.email
+  });
+  closeGenericModal();
+  toast('Caixa aberto!');
+}
+function fecharCaixaPrompt(){
+  const vendas = calcularVendasCaixa();
+  const totalEsperado = (caixaAtual.valorAbertura||0) + vendas;
+  editingType = 'fechar-caixa';
+  document.getElementById('genericModalTitle').textContent = 'Fechar Caixa';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <div class="card-2 p-3 text-sm space-y-1">
+        <div class="flex justify-between"><span class="text-[var(--txt-dim)]">Valor de abertura</span><span>${fmtBRL(caixaAtual.valorAbertura)}</span></div>
+        <div class="flex justify-between"><span class="text-[var(--txt-dim)]">Vendas no período</span><span>${fmtBRL(vendas)}</span></div>
+        <div class="flex justify-between font-bold pt-1 border-t border-[var(--line)]"><span>Total esperado em caixa</span><span>${fmtBRL(totalEsperado)}</span></div>
+      </div>
+      <label class="text-xs text-[var(--txt-dim)]">Valor contado no caixa (conferência)</label>
+      <input id="valorFechamento" type="number" step="0.01" class="input" value="${totalEsperado.toFixed(2)}">
+      <button onclick="confirmarFecharCaixa()" class="btn-gold w-full py-3 rounded-xl mt-2">Confirmar Fechamento</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarFecharCaixa(){
+  const valorContado = parseFloat(document.getElementById('valorFechamento').value)||0;
+  const vendas = calcularVendasCaixa();
+  await db.collection('caixaSessions').doc(caixaAtual.id).update({
+    status:'fechado',
+    valorFechamento: valorContado,
+    totalVendas: vendas,
+    fechadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    fechadoPor: currentUser.email
+  });
+  closeGenericModal();
+  toast('Caixa fechado!');
+}
+function openLancarVenda(){
+  editingType = 'venda-manual';
+  document.getElementById('genericModalTitle').textContent = 'Lançar Venda (Balcão)';
+  const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <select id="vProduto" class="input" onchange="document.getElementById('vNomeLivre').classList.toggle('hide', this.value!=='__livre__')">
+        <option value="" disabled selected>Selecione o produto</option>
+        ${opcoesCatalogo}
+        <option value="__livre__">Outro item (digitar manualmente)</option>
+      </select>
+      <input id="vNomeLivre" class="input hide" placeholder="Nome do item">
+      <div class="grid grid-cols-2 gap-2">
+        <input id="vQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
+        <input id="vPrecoUnit" type="number" step="0.01" class="input" placeholder="Preço unitário (se item avulso)">
+      </div>
+      <button onclick="confirmarVendaManual()" class="btn-gold w-full py-3 rounded-xl mt-2">Lançar Venda</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarVendaManual(){
+  const produtoId = document.getElementById('vProduto').value;
+  const qtd = parseInt(document.getElementById('vQtd').value)||1;
+  let itemName, precoUnit, catalogRef = null;
+  if(produtoId==='__livre__'){
+    itemName = document.getElementById('vNomeLivre').value.trim();
+    precoUnit = parseFloat(document.getElementById('vPrecoUnit').value)||0;
+    if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return; }
+  } else {
+    const item = catalogItems.find(i=>i.id===produtoId);
+    if(!item){ toast('Selecione um produto.', 'err'); return; }
+    itemName = item.name; precoUnit = item.price; catalogRef = item;
+  }
+  const total = precoUnit * qtd;
+  try{
+    await db.collection('orders').add({
+      clientId: null, clientName: 'Venda balcão',
+      clientPhone: '',
+      items: [{itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd}],
+      total, status:'entregue', source:'balcao',
+      entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if(catalogRef){
+      await db.collection('catalogItems').doc(catalogRef.id).update({
+        stock: Math.max(0, (catalogRef.stock||0) - qtd)
+      });
+    }
+    closeGenericModal();
+    toast('Venda lançada!');
+  }catch(e){ toast('Erro ao lançar venda.', 'err'); }
+}
+
+// ---------------- RANKING DE PRODUTOS MAIS VENDIDOS ----------------
+function renderTopProducts(){
+  const box = document.getElementById('topProductsList');
+  if(!box) return;
+  const counts = {};
+  orders.filter(o=>o.status==='entregue').forEach(o=>{
+    (o.items||[]).forEach(it=>{
+      counts[it.name] = (counts[it.name]||0) + (it.qty||1);
+    });
+  });
+  const ranked = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if(ranked.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhuma venda registrada ainda.</p>`; return; }
+  box.innerHTML = ranked.map(([name,qty],idx)=>`
+    <div class="card p-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="font-display text-lg text-[var(--gold)] w-6">${idx+1}º</span>
+        <span class="text-sm font-semibold">${name}</span>
+      </div>
+      <span class="text-sm text-[var(--txt-dim)]">${qty} vendido(s)</span>
+    </div>`).join('');
 }
 
 function adminAppointmentRow(a){
@@ -992,11 +1179,15 @@ function adminOrderRow(o){
   </div>`;
 }
 async function updateApptStatus(id, status){
-  await db.collection('appointments').doc(id).update({status});
+  const data = {status};
+  if(status==='concluido') data.concluidoEm = firebase.firestore.FieldValue.serverTimestamp();
+  await db.collection('appointments').doc(id).update(data);
   toast('Status atualizado!');
 }
 async function updateOrderStatus(id, status){
-  await db.collection('orders').doc(id).update({status});
+  const data = {status};
+  if(status==='entregue') data.entregueEm = firebase.firestore.FieldValue.serverTimestamp();
+  await db.collection('orders').doc(id).update(data);
   toast('Status atualizado!');
 }
 
@@ -1018,14 +1209,26 @@ function renderAdminAgenda(){
 }
 
 function openManualBooking(){
+  if(services.length===0 || barbers.length===0){
+    toast('Cadastre pelo menos 1 serviço e 1 barbeiro antes de agendar manualmente.', 'err');
+    if(services.length===0) goToAdmin('servicos');
+    else goToAdmin('equipe');
+    return;
+  }
   editingType = 'manual-appt';
   document.getElementById('genericModalTitle').textContent = 'Agendamento Manual';
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <input id="mClientName" class="input" placeholder="Nome do cliente">
       <input id="mClientPhone" class="input" placeholder="WhatsApp do cliente">
-      <select id="mService" class="input">${services.map(s=>`<option value="${s.id}">${s.name} — ${fmtBRL(s.price)}</option>`).join('')}</select>
-      <select id="mBarber" class="input">${barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}</select>
+      <select id="mService" class="input">
+        <option value="" disabled selected>Selecione o serviço</option>
+        ${services.map(s=>`<option value="${s.id}">${s.name} — ${fmtBRL(s.price)}</option>`).join('')}
+      </select>
+      <select id="mBarber" class="input">
+        <option value="" disabled selected>Selecione o barbeiro</option>
+        ${barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
+      </select>
       <input id="mDate" type="date" class="input" value="${todayStr()}">
       <input id="mTime" type="time" class="input">
       <button onclick="saveManualBooking()" class="btn-gold w-full py-3 rounded-xl mt-2">Salvar Agendamento</button>
@@ -1033,13 +1236,18 @@ function openManualBooking(){
   document.getElementById('genericModal').classList.remove('hide');
 }
 async function saveManualBooking(){
-  const service = services.find(s=>s.id===document.getElementById('mService').value);
-  const barber = barbers.find(b=>b.id===document.getElementById('mBarber').value);
+  const serviceId = document.getElementById('mService').value;
+  const barberId = document.getElementById('mBarber').value;
+  const service = services.find(s=>s.id===serviceId);
+  const barber = barbers.find(b=>b.id===barberId);
   const name = document.getElementById('mClientName').value.trim();
   const phone = document.getElementById('mClientPhone').value.trim();
   const date = document.getElementById('mDate').value;
   const time = document.getElementById('mTime').value;
-  if(!name || !date || !time || !service || !barber){ toast('Preencha todos os campos.', 'err'); return; }
+  if(!name){ toast('Preencha o nome do cliente.', 'err'); return; }
+  if(!service){ toast('Selecione o serviço.', 'err'); return; }
+  if(!barber){ toast('Selecione o barbeiro.', 'err'); return; }
+  if(!date || !time){ toast('Preencha data e horário.', 'err'); return; }
   await db.collection('appointments').add({
     clientId: null, clientName: name, clientPhone: phone,
     barberId: barber.id, barberName: barber.name,
@@ -1050,6 +1258,33 @@ async function saveManualBooking(){
   });
   closeGenericModal();
   toast('Agendamento manual criado!');
+}
+
+// ---------------- UPLOAD DE FOTO (sem precisar de Firebase Storage/plano pago) ----------------
+// Converte a imagem escolhida pelo usuário em uma versão redimensionada + comprimida
+// e grava como data URI diretamente no campo (mesmo esquema usado para a logo do app).
+function handleImageInput(fileInputEl, hiddenFieldId, previewId, maxDim=480){
+  const file = fileInputEl.files[0];
+  if(!file) return;
+  if(file.size > 8*1024*1024){ toast('Imagem muito grande (máx. 8MB). Escolha outra.', 'err'); return; }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if(w > h && w > maxDim){ h = Math.round(h*maxDim/w); w = maxDim; }
+      else if(h > maxDim){ w = Math.round(w*maxDim/h); h = maxDim; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUri = canvas.toDataURL('image/jpeg', 0.75);
+      document.getElementById(hiddenFieldId).value = dataUri;
+      const preview = document.getElementById(previewId);
+      if(preview){ preview.src = dataUri; preview.classList.remove('hide'); }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 // ---------------- SERVIÇOS (admin CRUD) ----------------
@@ -1125,7 +1360,14 @@ function openBarberForm(b){
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <input id="fName" class="input" placeholder="Nome do barbeiro" value="${b?.name||''}">
-      <input id="fPhoto" class="input" placeholder="URL da foto (opcional)" value="${b?.photoUrl||''}">
+      <div class="flex items-center gap-3">
+        <img id="fPhotoPreview" src="${b?.photoUrl||''}" class="w-16 h-16 rounded-full object-cover border border-[var(--line)] ${b?.photoUrl?'':'hide'}">
+        <div class="flex-1">
+          <label class="text-xs text-[var(--txt-dim)] block mb-1">Foto do barbeiro</label>
+          <input type="file" accept="image/*" class="input text-xs" onchange="handleImageInput(this,'fPhoto','fPhotoPreview')">
+        </div>
+      </div>
+      <input type="hidden" id="fPhoto" value="${b?.photoUrl||''}">
       <p class="text-xs text-[var(--txt-dim)] mt-1">Dias de trabalho</p>
       <div class="flex flex-wrap gap-2" id="dayChips">
         ${['mon','tue','wed','thu','fri','sat','sun'].map(d=>`
@@ -1172,17 +1414,27 @@ async function saveBarber(){
 function renderAdminCatalog(){
   const box = document.getElementById('adminCatalogList');
   if(catalogItems.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhum item cadastrado.</p>`; return; }
-  box.innerHTML = catalogItems.map(i=>`
+  const lowStockCount = catalogItems.filter(i=> i.active!==false && i.stockMin>0 && (i.stock??0) <= i.stockMin).length;
+  const alertBox = lowStockCount>0 ? `
+    <div class="card-2 border border-[var(--warn)] p-3 mb-3 text-sm flex items-center gap-2">
+      <i class="fa-solid fa-triangle-exclamation text-[var(--warn)]"></i>
+      <span>${lowStockCount} item(s) no estoque mínimo ou abaixo — reponha logo.</span>
+    </div>` : '';
+  box.innerHTML = alertBox + catalogItems.map(i=>{
+    const lowStock = i.stockMin>0 && (i.stock??0) <= i.stockMin;
+    return `
     <div class="card p-3 flex items-center justify-between">
       <div>
         <p class="font-semibold text-sm">${i.name} ${!i.active?'<span class="text-[var(--danger)] text-xs">(inativo)</span>':''}</p>
-        <p class="text-xs text-[var(--txt-dim)]">${CAT_LABELS[i.category]||i.category} · ${fmtBRL(i.price)} · estoque: ${i.stock??0}</p>
+        <p class="text-xs text-[var(--txt-dim)]">${CAT_LABELS[i.category]||i.category} · ${fmtBRL(i.price)} · estoque: ${i.stock??0}${i.stockMin>0?` (mín: ${i.stockMin})`:''}
+          ${lowStock?' <span class="text-[var(--warn)] font-semibold">· ESTOQUE BAIXO</span>':''}</p>
       </div>
       <div class="flex gap-2">
         <button onclick='openCatalogForm(${JSON.stringify(i).replace(/'/g,"&apos;")})' class="w-8 h-8 card-2 rounded-lg"><i class="fa-solid fa-pen text-xs"></i></button>
         <button onclick="deleteDoc('catalogItems','${i.id}')" class="w-8 h-8 card-2 rounded-lg text-[var(--danger)]"><i class="fa-solid fa-trash text-xs"></i></button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 function openCatalogForm(i){
   editingType = 'catalog'; editingId = i?.id || null;
@@ -1198,8 +1450,24 @@ function openCatalogForm(i){
         <option value="terere" ${i?.category==='terere'?'selected':''}>Tereré</option>
       </select>
       <input id="fPrice" type="number" step="0.01" class="input" placeholder="Preço (R$)" value="${i?.price||''}">
-      <input id="fStock" type="number" class="input" placeholder="Estoque" value="${i?.stock??''}">
-      <input id="fImage" class="input" placeholder="URL da imagem (opcional)" value="${i?.imageUrl||''}">
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-[var(--txt-dim)] block mb-1">Estoque atual</label>
+          <input id="fStock" type="number" class="input" placeholder="Estoque" value="${i?.stock??''}">
+        </div>
+        <div>
+          <label class="text-xs text-[var(--txt-dim)] block mb-1">Estoque mínimo</label>
+          <input id="fStockMin" type="number" class="input" placeholder="Ex: 5" value="${i?.stockMin??''}">
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <img id="fImagePreview" src="${i?.imageUrl||''}" class="w-16 h-16 rounded-lg object-cover border border-[var(--line)] ${i?.imageUrl?'':'hide'}">
+        <div class="flex-1">
+          <label class="text-xs text-[var(--txt-dim)] block mb-1">Foto do produto</label>
+          <input type="file" accept="image/*" class="input text-xs" onchange="handleImageInput(this,'fImage','fImagePreview')">
+        </div>
+      </div>
+      <input type="hidden" id="fImage" value="${i?.imageUrl||''}">
       <label class="flex items-center gap-2 text-sm"><input id="fActive" type="checkbox" ${i?.active!==false?'checked':''}> Ativo</label>
       <button onclick="saveCatalogItem()" class="btn-gold w-full py-3 rounded-xl mt-2">Salvar</button>
     </div>`;
@@ -1211,6 +1479,7 @@ async function saveCatalogItem(){
     category: document.getElementById('fCategory').value,
     price: parseFloat(document.getElementById('fPrice').value)||0,
     stock: parseInt(document.getElementById('fStock').value)||0,
+    stockMin: parseInt(document.getElementById('fStockMin').value)||0,
     imageUrl: document.getElementById('fImage').value.trim(),
     active: document.getElementById('fActive').checked
   };
