@@ -437,6 +437,7 @@ const WEEK_KEYS = ["sun","mon","tue","wed","thu","fri","sat"];
 const WEEK_LABELS = {mon:"Seg",tue:"Ter",wed:"Qua",thu:"Qui",fri:"Sex",sat:"Sáb",sun:"Dom"};
 
 function fmtBRL(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function capitalize(str){ return str ? str.charAt(0).toUpperCase()+str.slice(1) : ''; }
 function toast(msg, type="ok"){
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -692,16 +693,17 @@ function showBookStep(n){
 }
 function bookBack(n){ showBookStep(n); }
 
+const SERVICE_CAT_LABEL = {cabelo:'Cabelo', barba:'Barba', quimica:'Química/Tratamento', estetica:'Estética', combo:'Combo'};
+
 function renderServiceList(){
   const box = document.getElementById('serviceList');
   if(!box) return;
   if(services.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhum serviço disponível no momento.</p>`; return; }
-  const catLabel = {cabelo:'Cabelo', barba:'Barba', quimica:'Química/Tratamento', estetica:'Estética', combo:'Combo'};
   box.innerHTML = services.map(s=>`
     <button onclick="selectService('${s.id}')" class="card-2 w-full p-4 flex items-center justify-between text-left">
       <div>
         <p class="font-semibold">${s.name}</p>
-        <p class="text-xs text-[var(--txt-dim)]">${catLabel[s.category]||''} · ${s.durationMin} min</p>
+        <p class="text-xs text-[var(--txt-dim)]">${SERVICE_CAT_LABEL[s.category] || capitalize(s.category)} · ${s.durationMin} min</p>
       </div>
       <p class="font-display text-xl text-[var(--gold)]">${fmtBRL(s.price)}</p>
     </button>`).join('');
@@ -1432,7 +1434,7 @@ function renderAdminServices(){
     <div class="card p-3 flex items-center justify-between">
       <div>
         <p class="font-semibold text-sm">${s.name} ${!s.active?'<span class="text-[var(--danger)] text-xs">(inativo)</span>':''}</p>
-        <p class="text-xs text-[var(--txt-dim)]">${s.category} · ${s.durationMin}min · ${fmtBRL(s.price)}</p>
+        <p class="text-xs text-[var(--txt-dim)]">${SERVICE_CAT_LABEL[s.category]||capitalize(s.category)} · ${s.durationMin}min · ${fmtBRL(s.price)}</p>
       </div>
       <div class="flex gap-2">
         <button onclick='openServiceForm(${JSON.stringify(s).replace(/'/g,"&apos;")})' class="w-8 h-8 card-2 rounded-lg"><i class="fa-solid fa-pen text-xs"></i></button>
@@ -1446,13 +1448,13 @@ function openServiceForm(s){
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <input id="fName" class="input" placeholder="Nome do serviço" value="${s?.name||''}">
-      <select id="fCategory" class="input">
-        <option value="cabelo" ${s?.category==='cabelo'?'selected':''}>Cabelo</option>
-        <option value="barba" ${s?.category==='barba'?'selected':''}>Barba</option>
-        <option value="quimica" ${s?.category==='quimica'?'selected':''}>Química/Tratamento</option>
-        <option value="estetica" ${s?.category==='estetica'?'selected':''}>Estética</option>
-        <option value="combo" ${s?.category==='combo'?'selected':''}>Combo</option>
-      </select>
+      <div>
+        <label class="text-xs text-[var(--txt-dim)] block mb-1">Categoria</label>
+        <input id="fCategory" class="input" list="serviceCategoryOptions" placeholder="Ex: Cabelo, Barba, Estética..." value="${s?.category||''}">
+        <datalist id="serviceCategoryOptions">
+          ${[...new Set(['cabelo','barba','quimica','estetica','combo', ...services.map(sv=>sv.category)])].map(c=>`<option value="${c}">${SERVICE_CAT_LABEL[c]||capitalize(c)}</option>`).join('')}
+        </datalist>
+      </div>
       <input id="fPrice" type="number" step="0.01" class="input" placeholder="Preço (R$)" value="${s?.price||''}">
       <input id="fDuration" type="number" class="input" placeholder="Duração (minutos)" value="${s?.durationMin||''}">
       <label class="flex items-center gap-2 text-sm"><input id="fActive" type="checkbox" ${s?.active!==false?'checked':''}> Ativo</label>
@@ -1463,7 +1465,7 @@ function openServiceForm(s){
 async function saveService(){
   const data = {
     name: document.getElementById('fName').value.trim(),
-    category: document.getElementById('fCategory').value,
+    category: document.getElementById('fCategory').value.trim().toLowerCase() || 'outros',
     price: parseFloat(document.getElementById('fPrice').value)||0,
     durationMin: parseInt(document.getElementById('fDuration').value)||30,
     active: document.getElementById('fActive').checked
