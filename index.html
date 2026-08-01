@@ -1205,79 +1205,123 @@ async function confirmarFecharCaixa(){
   closeGenericModal();
   toast('Caixa fechado!');
 }
+// ---------------- BLOCO REUTILIZÁVEL: seleção de produto + desconto + comissão ----------------
+// Usado tanto em "Lançar Venda" (Caixa) quanto em "Adicionar Item à Mesa".
+function vendaFormHtml(prefix){
+  const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
+  const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  return `
+    <select id="${prefix}Produto" class="input" onchange="onVendaProdutoChange('${prefix}')">
+      <option value="" disabled selected>Selecione o produto</option>
+      ${opcoesCatalogo}
+      <option value="__livre__">Outro item (digitar manualmente)</option>
+    </select>
+    <input id="${prefix}NomeLivre" class="input hide mt-3" placeholder="Nome do item">
+    <div class="grid grid-cols-2 gap-2 mt-3">
+      <input id="${prefix}Qtd" type="number" class="input" placeholder="Quantidade" value="1" min="1" oninput="atualizarTotalVenda('${prefix}')">
+      <input id="${prefix}PrecoUnit" type="number" step="0.01" class="input hide" placeholder="Preço unitário" oninput="atualizarTotalVenda('${prefix}')">
+    </div>
+    <div id="${prefix}PrecoAutoDisplay" class="hide card-2 p-2 text-sm flex justify-between mt-3">
+      <span class="text-[var(--txt-dim)]">Preço unitário (já cadastrado)</span><span id="${prefix}PrecoAutoValor" class="font-semibold"></span>
+    </div>
+    <div class="mt-3">
+      <label class="text-xs text-[var(--txt-dim)] block mb-1">Desconto no total (R$) — opcional</label>
+      <input id="${prefix}Desconto" type="number" step="0.01" class="input" placeholder="0,00" oninput="atualizarTotalVenda('${prefix}')">
+    </div>
+    <div class="card-2 p-2 flex justify-between text-sm font-semibold mt-3">
+      <span>Total</span><span id="${prefix}TotalDisplay">R$ 0,00</span>
+    </div>
+    <div class="pt-3 mt-3 border-t border-[var(--line)]">
+      <label class="text-xs text-[var(--txt-dim)] block mb-1">Comissão — escolha um barbeiro/colaborador cadastrado (opcional)</label>
+      <select id="${prefix}Barbeiro" class="input">
+        <option value="">Sem indicação</option>
+        ${opcoesBarbeiro}
+      </select>
+      <p class="text-xs text-[var(--txt-dim)] mt-2 mb-1">Preencha só UM dos dois campos:</p>
+      <div class="grid grid-cols-2 gap-2">
+        <input id="${prefix}ComissaoPct" type="number" step="0.1" class="input" placeholder="Comissão em %">
+        <input id="${prefix}ComissaoValor" type="number" step="0.01" class="input" placeholder="Comissão em R$">
+      </div>
+    </div>`;
+}
+function onVendaProdutoChange(prefix){
+  const produtoId = document.getElementById(prefix+'Produto').value;
+  const isLivre = produtoId === '__livre__';
+  document.getElementById(prefix+'NomeLivre').classList.toggle('hide', !isLivre);
+  document.getElementById(prefix+'PrecoUnit').classList.toggle('hide', !isLivre);
+  document.getElementById(prefix+'PrecoAutoDisplay').classList.toggle('hide', isLivre || !produtoId);
+  if(!isLivre && produtoId){
+    const item = catalogItems.find(i=>i.id===produtoId);
+    document.getElementById(prefix+'PrecoAutoValor').textContent = fmtBRL(item?.price||0);
+  }
+  atualizarTotalVenda(prefix);
+}
+function atualizarTotalVenda(prefix){
+  const produtoId = document.getElementById(prefix+'Produto').value;
+  const qtd = parseInt(document.getElementById(prefix+'Qtd').value)||1;
+  const desconto = parseFloat(document.getElementById(prefix+'Desconto').value)||0;
+  let precoUnit = 0;
+  if(produtoId==='__livre__'){ precoUnit = parseFloat(document.getElementById(prefix+'PrecoUnit').value)||0; }
+  else { const item = catalogItems.find(i=>i.id===produtoId); precoUnit = item?.price||0; }
+  const total = Math.max(0, precoUnit*qtd - desconto);
+  const totalEl = document.getElementById(prefix+'TotalDisplay');
+  if(totalEl) totalEl.textContent = fmtBRL(total);
+}
+// Lê os campos do bloco e devolve os dados prontos pra salvar (ou null se inválido)
+function lerVendaForm(prefix){
+  const produtoId = document.getElementById(prefix+'Produto').value;
+  const qtd = parseInt(document.getElementById(prefix+'Qtd').value)||1;
+  const desconto = parseFloat(document.getElementById(prefix+'Desconto').value)||0;
+  const barberId = document.getElementById(prefix+'Barbeiro').value;
+  const barberRef = barberId ? barbers.find(b=>b.id===barberId) : null;
+  const pctDigitado = parseFloat(document.getElementById(prefix+'ComissaoPct').value) || 0;
+  const valorDigitado = parseFloat(document.getElementById(prefix+'ComissaoValor').value) || 0;
+  let itemName, precoUnit, catalogRef = null;
+  if(produtoId==='__livre__'){
+    itemName = document.getElementById(prefix+'NomeLivre').value.trim();
+    precoUnit = parseFloat(document.getElementById(prefix+'PrecoUnit').value)||0;
+    if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return null; }
+  } else {
+    const item = catalogItems.find(i=>i.id===produtoId);
+    if(!item){ toast('Selecione um produto.', 'err'); return null; }
+    itemName = item.name; precoUnit = item.price; catalogRef = item;
+  }
+  const total = Math.max(0, precoUnit*qtd - desconto);
+  const finalUnitPrice = qtd>0 ? total/qtd : precoUnit; // desconto já embutido no preço unitário guardado
+  let comissaoPct = 0, comissaoValor = 0;
+  if(barberRef){
+    if(pctDigitado > 0){ comissaoPct = pctDigitado; comissaoValor = total*(pctDigitado/100); }
+    else if(valorDigitado > 0){ comissaoValor = valorDigitado; comissaoPct = null; }
+  }
+  return {itemName, precoUnit: finalUnitPrice, precoOriginal: precoUnit, qtd, desconto, total, catalogRef, barberRef, comissaoPct, comissaoValor};
+}
+
 function openLancarVenda(){
   editingType = 'venda-manual';
   document.getElementById('genericModalTitle').textContent = 'Lançar Venda (Balcão)';
-  const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
   document.getElementById('genericModalBody').innerHTML = `
-    <div class="space-y-3">
-      <select id="vProduto" class="input" onchange="document.getElementById('vNomeLivre').classList.toggle('hide', this.value!=='__livre__')">
-        <option value="" disabled selected>Selecione o produto</option>
-        ${opcoesCatalogo}
-        <option value="__livre__">Outro item (digitar manualmente)</option>
-      </select>
-      <input id="vNomeLivre" class="input hide" placeholder="Nome do item">
-      <div class="grid grid-cols-2 gap-2">
-        <input id="vQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
-        <input id="vPrecoUnit" type="number" step="0.01" class="input" placeholder="Preço unitário (se item avulso)">
-      </div>
-      <div class="pt-2 border-t border-[var(--line)]">
-        <label class="text-xs text-[var(--txt-dim)] block mb-1">Teve indicação? Nome de quem indicou (opcional)</label>
-        <input id="vIndicadoPor" class="input" list="barberNamesList" placeholder="Ex: João (pode ser qualquer colaborador)">
-        <datalist id="barberNamesList">
-          ${barbers.map(b=>`<option value="${b.name}">`).join('')}
-        </datalist>
-        <p class="text-xs text-[var(--txt-dim)] mt-2 mb-1">Comissão — preencha só UM dos dois campos abaixo:</p>
-        <div class="grid grid-cols-2 gap-2">
-          <input id="vComissaoPct" type="number" step="0.1" class="input" placeholder="Comissão em %">
-          <input id="vComissaoValor" type="number" step="0.01" class="input" placeholder="Comissão em R$">
-        </div>
-      </div>
-      <button onclick="confirmarVendaManual()" class="btn-gold w-full py-3 rounded-xl mt-2">Lançar Venda</button>
+    <div class="space-y-0">
+      ${vendaFormHtml('v')}
+      <button onclick="confirmarVendaManual()" class="btn-gold w-full py-3 rounded-xl mt-4">Lançar Venda</button>
     </div>`;
   document.getElementById('genericModal').classList.remove('hide');
 }
 async function confirmarVendaManual(){
-  const produtoId = document.getElementById('vProduto').value;
-  const qtd = parseInt(document.getElementById('vQtd').value)||1;
-  const indicadoPor = document.getElementById('vIndicadoPor').value.trim();
-  const pctDigitado = parseFloat(document.getElementById('vComissaoPct').value) || 0;
-  const valorDigitado = parseFloat(document.getElementById('vComissaoValor').value) || 0;
-  let itemName, precoUnit, catalogRef = null;
-  if(produtoId==='__livre__'){
-    itemName = document.getElementById('vNomeLivre').value.trim();
-    precoUnit = parseFloat(document.getElementById('vPrecoUnit').value)||0;
-    if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return; }
-  } else {
-    const item = catalogItems.find(i=>i.id===produtoId);
-    if(!item){ toast('Selecione um produto.', 'err'); return; }
-    itemName = item.name; precoUnit = item.price; catalogRef = item;
-  }
-  const total = precoUnit * qtd;
-
-  // Se tem indicação, calcula a comissão: prioriza % se preenchido, senão usa o valor fixo em R$
-  let comissaoPct = 0, comissaoValor = 0;
-  if(indicadoPor){
-    if(pctDigitado > 0){
-      comissaoPct = pctDigitado;
-      comissaoValor = total * (pctDigitado/100);
-    } else if(valorDigitado > 0){
-      comissaoValor = valorDigitado;
-      comissaoPct = null; // foi definido em valor fixo, não em %
-    }
-  }
-  // Tenta casar o nome digitado com um barbeiro já cadastrado (não obrigatório)
-  const barberMatch = barbers.find(b => b.name.trim().toLowerCase() === indicadoPor.toLowerCase());
-
+  const dados = lerVendaForm('v');
+  if(!dados) return;
+  const {itemName, precoUnit, qtd, desconto, total, catalogRef, barberRef, comissaoPct, comissaoValor} = dados;
   try{
     await db.collection('orders').add({
       clientId: null, clientName: 'Venda balcão',
       clientPhone: '',
-      items: [{itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd}],
-      total, status:'entregue', source:'balcao',
-      indicadoPor: indicadoPor || null,
-      barberId: barberMatch?.id || null,
-      barberName: indicadoPor || null,
+      items: [{
+        itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd,
+        barberId: barberRef?.id||null, barberName: barberRef?.name||null,
+        comissaoPct, comissaoValor
+      }],
+      total, desconto, status:'entregue', source:'balcao',
+      barberId: barberRef?.id || null,
+      barberName: barberRef?.name || null,
       comissaoPct, comissaoValor,
       entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1800,6 +1844,12 @@ function renderComissoes(){
   const startMs = getPeriodStart(comissaoPeriodo).getTime();
   const weekStartMs = getWeekStart().getTime();
 
+  // Pedidos (balcão/mesa) entregues dentro do período, com o timestamp de referência já resolvido
+  const pedidosPeriodo = orders.filter(o=>o.status==='entregue').map(o=>({
+    order:o,
+    t: o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0)
+  })).filter(x=>x.t >= startMs);
+
   box.innerHTML = barbers.map(b=>{
     const commissionPct = b.commissionPct||0;
     const apptsPeriodo = appointments.filter(a=>{
@@ -1810,13 +1860,17 @@ function renderComissoes(){
     const faturamentoServicos = apptsPeriodo.reduce((s,a)=>s+(a.price||0),0);
     const comissaoServicos = faturamentoServicos * (commissionPct/100);
 
-    const pedidosIndicados = orders.filter(o=>{
-      if((o.barberName||'').trim().toLowerCase() !== b.name.trim().toLowerCase() || o.status!=='entregue') return false;
-      const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
-      return t >= startMs;
+    // Soma item a item — funciona mesmo em mesas com vários produtos/indicações diferentes
+    let faturamentoIndicacoes = 0, comissaoIndicacoes = 0, qtdIndicacoes = 0;
+    pedidosPeriodo.forEach(({order})=>{
+      (order.items||[]).forEach(it=>{
+        if(it.barberId===b.id){
+          faturamentoIndicacoes += (it.price||0)*(it.qty||1);
+          comissaoIndicacoes += it.comissaoValor||0;
+          qtdIndicacoes += 1;
+        }
+      });
     });
-    const faturamentoIndicacoes = pedidosIndicados.reduce((s,o)=>s+(o.total||0),0);
-    const comissaoIndicacoes = pedidosIndicados.reduce((s,o)=>s+(o.comissaoValor||0),0);
 
     const totalComissao = comissaoServicos + comissaoIndicacoes;
     const totalFaturado = faturamentoServicos + faturamentoIndicacoes;
@@ -1835,14 +1889,15 @@ function renderComissoes(){
     <div class="card p-4">
       <div class="flex items-center justify-between mb-2">
         <p class="font-semibold">${b.name}</p>
-        <span class="text-xs text-[var(--txt-dim)]">${commissionPct}% comissão</span>
+        <span class="text-xs text-[var(--txt-dim)]">${commissionPct}% comissão em serviços</span>
       </div>
       <div class="grid grid-cols-2 gap-2 text-sm mb-3">
         <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Atendimentos</p><p class="font-semibold">${apptsPeriodo.length}</p></div>
-        <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Faturado</p><p class="font-semibold">${fmtBRL(totalFaturado)}</p></div>
+        <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Indicações de produto</p><p class="font-semibold">${qtdIndicacoes}</p></div>
+        <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Faturado (total)</p><p class="font-semibold">${fmtBRL(totalFaturado)}</p></div>
         <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Comissão dele</p><p class="font-semibold text-[var(--ok)]">${fmtBRL(totalComissao)}</p></div>
-        <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Fica pra barbearia</p><p class="font-semibold text-[var(--gold)]">${fmtBRL(totalBarbearia)}</p></div>
       </div>
+      <p class="text-xs text-[var(--txt-dim)] mb-3">Fica pra barbearia: <span class="text-[var(--gold)] font-semibold">${fmtBRL(totalBarbearia)}</span></p>
       ${meta>0 ? `
       <div>
         <div class="flex justify-between text-xs text-[var(--txt-dim)] mb-1">
@@ -1853,37 +1908,8 @@ function renderComissoes(){
         </div>
       </div>` : `<p class="text-xs text-[var(--txt-dim)]">Sem meta semanal definida — edite o barbeiro em Equipe pra adicionar.</p>`}
     </div>`;
-  }).join('') + renderIndicacoesAvulsas(startMs);
+  }).join('');
 }
-function renderIndicacoesAvulsas(startMs){
-  const nomesBarbeiros = barbers.map(b=>b.name.trim().toLowerCase());
-  const avulsos = {};
-  orders.filter(o=>{
-    if(!o.barberName || o.status!=='entregue') return false;
-    if(nomesBarbeiros.includes(o.barberName.trim().toLowerCase())) return false; // já contado acima
-    const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
-    return t >= startMs;
-  }).forEach(o=>{
-    const nome = o.barberName.trim();
-    if(!avulsos[nome]) avulsos[nome] = {faturado:0, comissao:0, qtd:0};
-    avulsos[nome].faturado += o.total||0;
-    avulsos[nome].comissao += o.comissaoValor||0;
-    avulsos[nome].qtd += 1;
-  });
-  const nomes = Object.keys(avulsos);
-  if(nomes.length===0) return '';
-  return `
-    <p class="text-xs text-[var(--txt-dim)] uppercase tracking-wide mt-2 mb-1">Outras indicações (não cadastrados como barbeiro)</p>
-    ${nomes.map(nome=>`
-      <div class="card p-3 flex items-center justify-between">
-        <div>
-          <p class="font-semibold text-sm">${nome}</p>
-          <p class="text-xs text-[var(--txt-dim)]">${avulsos[nome].qtd} venda(s) · faturado: ${fmtBRL(avulsos[nome].faturado)}</p>
-        </div>
-        <p class="font-semibold text-sm text-[var(--ok)]">${fmtBRL(avulsos[nome].comissao)}</p>
-      </div>`).join('')}`;
-}
-
 // ---------------- MESAS (comandas) ----------------
 function renderMesas(){
   const box = document.getElementById('mesasList');
@@ -1922,40 +1948,25 @@ function abrirNovaMesa(){
 function openAdicionarItemMesa(mesaId){
   editingType = 'item-mesa';
   editingId = mesaId;
-  const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
   document.getElementById('genericModalTitle').textContent = 'Adicionar Item à Mesa';
   document.getElementById('genericModalBody').innerHTML = `
-    <div class="space-y-3">
-      <select id="mItemProduto" class="input" onchange="document.getElementById('mItemNomeLivre').classList.toggle('hide', this.value!=='__livre__')">
-        <option value="" disabled selected>Selecione o produto</option>
-        ${opcoesCatalogo}
-        <option value="__livre__">Outro item (digitar manualmente)</option>
-      </select>
-      <input id="mItemNomeLivre" class="input hide" placeholder="Nome do item">
-      <div class="grid grid-cols-2 gap-2">
-        <input id="mItemQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
-        <input id="mItemPreco" type="number" step="0.01" class="input" placeholder="Preço unitário (se avulso)">
-      </div>
-      <button onclick="confirmarAdicionarItemMesa()" class="btn-gold w-full py-3 rounded-xl mt-2">Adicionar à Mesa</button>
+    <div class="space-y-0">
+      ${vendaFormHtml('m')}
+      <button onclick="confirmarAdicionarItemMesa()" class="btn-gold w-full py-3 rounded-xl mt-4">Adicionar à Mesa</button>
     </div>`;
   document.getElementById('genericModal').classList.remove('hide');
 }
 async function confirmarAdicionarItemMesa(){
   const mesaId = editingId;
-  const produtoId = document.getElementById('mItemProduto').value;
-  const qtd = parseInt(document.getElementById('mItemQtd').value)||1;
-  let itemName, precoUnit, catalogRef = null;
-  if(produtoId==='__livre__'){
-    itemName = document.getElementById('mItemNomeLivre').value.trim();
-    precoUnit = parseFloat(document.getElementById('mItemPreco').value)||0;
-    if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return; }
-  } else {
-    const item = catalogItems.find(i=>i.id===produtoId);
-    if(!item){ toast('Selecione um produto.', 'err'); return; }
-    itemName = item.name; precoUnit = item.price; catalogRef = item;
-  }
+  const dados = lerVendaForm('m');
+  if(!dados) return;
+  const {itemName, precoUnit, qtd, total, catalogRef, barberRef, comissaoPct, comissaoValor} = dados;
   const mesa = mesasAbertas.find(m=>m.id===mesaId);
-  const novosItens = [...(mesa?.itens||[]), {itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd}];
+  const novosItens = [...(mesa?.itens||[]), {
+    itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd,
+    barberId: barberRef?.id||null, barberName: barberRef?.name||null,
+    comissaoPct, comissaoValor
+  }];
   try{
     await db.collection('mesas').doc(mesaId).update({itens: novosItens});
     if(catalogRef){
