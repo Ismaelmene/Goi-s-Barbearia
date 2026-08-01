@@ -323,10 +323,20 @@
     <div id="comissoesList" class="space-y-3"></div>
   </section>
 
+  <!-- ---------- MESAS (comandas) ---------- -->
+  <section id="admin-mesas" class="hide px-5 pt-5 fade-in pb-10">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-display text-3xl">MESAS</h2>
+      <button onclick="abrirNovaMesa()" class="btn-gold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-plus mr-1"></i>Nova Mesa</button>
+    </div>
+    <div id="mesasList" class="space-y-3"></div>
+  </section>
+
   <nav class="fixed bottom-0 left-0 right-0 z-30 bg-[var(--panel)] border-t border-[var(--line)]">
-    <div class="max-w-md mx-auto grid grid-cols-6 text-center">
+    <div class="max-w-md mx-auto grid grid-cols-7 text-center">
       <button onclick="goToAdmin('dashboard')" data-anav="dashboard" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-chart-line"></i>Dash</button>
       <button onclick="goToAdmin('agenda')" data-anav="agenda" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-calendar-days"></i>Agenda</button>
+      <button onclick="goToAdmin('mesas')" data-anav="mesas" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-chair"></i>Mesas</button>
       <button onclick="goToAdmin('servicos')" data-anav="servicos" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-scissors"></i>Serviços</button>
       <button onclick="goToAdmin('equipe')" data-anav="equipe" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-user-tie"></i>Equipe</button>
       <button onclick="goToAdmin('catalogo')" data-anav="catalogo" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-bag-shopping"></i>Catálogo</button>
@@ -437,6 +447,7 @@ let userProfile = {};
 let authMode = "login";
 let services = [], barbers = [], catalogItems = [], appointments = [], orders = [], allUsers = {};
 let caixaAtual = null;
+let mesasAbertas = [];
 let firstOrdersSnapshot = true;
 let firstApptsSnapshot = true;
 let cart = []; // [{itemId, name, price, qty}]
@@ -621,6 +632,10 @@ function initAdminListeners(){
   db.collection('caixaSessions').where('status','==','aberto').limit(1).onSnapshot(s=>{
     caixaAtual = s.empty ? null : {id: s.docs[0].id, ...s.docs[0].data()};
     renderCaixaCard();
+  });
+  db.collection('mesas').where('status','==','aberta').onSnapshot(s=>{
+    mesasAbertas = s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> (a.abertaEm?.seconds||0) - (b.abertaEm?.seconds||0));
+    renderMesas();
   });
   document.getElementById('agendaDateFilter').value = todayStr();
   goToAdmin('dashboard');
@@ -995,13 +1010,19 @@ function renderMeusPedidos(){
    ============================  ADMIN  ==================================
    ===================================================================== */
 function goToAdmin(view){
-  ['dashboard','agenda','servicos','equipe','catalogo','comissoes'].forEach(v=>{
+  ['dashboard','agenda','servicos','equipe','catalogo','comissoes','mesas'].forEach(v=>{
     document.getElementById('admin-'+v).classList.toggle('hide', v!==view);
   });
   document.querySelectorAll('[data-anav]').forEach(b=>{
     b.classList.toggle('tab-active', b.dataset.anav===view);
   });
   if(view==='comissoes') renderComissoes();
+  if(view==='agenda'){
+    const dateInput = document.getElementById('agendaDateFilter');
+    if(dateInput && !dateInput.value) dateInput.value = todayStr();
+    renderAdminAgenda();
+  }
+  if(view==='mesas') renderMesas();
 }
 
 // ---------------- DASHBOARD ----------------
@@ -1188,7 +1209,6 @@ function openLancarVenda(){
   editingType = 'venda-manual';
   document.getElementById('genericModalTitle').textContent = 'Lançar Venda (Balcão)';
   const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
-  const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <select id="vProduto" class="input" onchange="document.getElementById('vNomeLivre').classList.toggle('hide', this.value!=='__livre__')">
@@ -1201,12 +1221,17 @@ function openLancarVenda(){
         <input id="vQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
         <input id="vPrecoUnit" type="number" step="0.01" class="input" placeholder="Preço unitário (se item avulso)">
       </div>
-      <div>
-        <label class="text-xs text-[var(--txt-dim)] block mb-1">Indicação de barbeiro (opcional — gera comissão pra ele)</label>
-        <select id="vBarbeiro" class="input">
-          <option value="">Sem indicação</option>
-          ${opcoesBarbeiro}
-        </select>
+      <div class="pt-2 border-t border-[var(--line)]">
+        <label class="text-xs text-[var(--txt-dim)] block mb-1">Teve indicação? Nome de quem indicou (opcional)</label>
+        <input id="vIndicadoPor" class="input" list="barberNamesList" placeholder="Ex: João (pode ser qualquer colaborador)">
+        <datalist id="barberNamesList">
+          ${barbers.map(b=>`<option value="${b.name}">`).join('')}
+        </datalist>
+        <p class="text-xs text-[var(--txt-dim)] mt-2 mb-1">Comissão — preencha só UM dos dois campos abaixo:</p>
+        <div class="grid grid-cols-2 gap-2">
+          <input id="vComissaoPct" type="number" step="0.1" class="input" placeholder="Comissão em %">
+          <input id="vComissaoValor" type="number" step="0.01" class="input" placeholder="Comissão em R$">
+        </div>
       </div>
       <button onclick="confirmarVendaManual()" class="btn-gold w-full py-3 rounded-xl mt-2">Lançar Venda</button>
     </div>`;
@@ -1215,8 +1240,9 @@ function openLancarVenda(){
 async function confirmarVendaManual(){
   const produtoId = document.getElementById('vProduto').value;
   const qtd = parseInt(document.getElementById('vQtd').value)||1;
-  const barberId = document.getElementById('vBarbeiro').value;
-  const barberRef = barberId ? barbers.find(b=>b.id===barberId) : null;
+  const indicadoPor = document.getElementById('vIndicadoPor').value.trim();
+  const pctDigitado = parseFloat(document.getElementById('vComissaoPct').value) || 0;
+  const valorDigitado = parseFloat(document.getElementById('vComissaoValor').value) || 0;
   let itemName, precoUnit, catalogRef = null;
   if(produtoId==='__livre__'){
     itemName = document.getElementById('vNomeLivre').value.trim();
@@ -1228,18 +1254,31 @@ async function confirmarVendaManual(){
     itemName = item.name; precoUnit = item.price; catalogRef = item;
   }
   const total = precoUnit * qtd;
-  const commissionPct = catalogRef?.commissionPct || 0;
-  const comissaoValor = barberRef ? total * (commissionPct/100) : 0;
+
+  // Se tem indicação, calcula a comissão: prioriza % se preenchido, senão usa o valor fixo em R$
+  let comissaoPct = 0, comissaoValor = 0;
+  if(indicadoPor){
+    if(pctDigitado > 0){
+      comissaoPct = pctDigitado;
+      comissaoValor = total * (pctDigitado/100);
+    } else if(valorDigitado > 0){
+      comissaoValor = valorDigitado;
+      comissaoPct = null; // foi definido em valor fixo, não em %
+    }
+  }
+  // Tenta casar o nome digitado com um barbeiro já cadastrado (não obrigatório)
+  const barberMatch = barbers.find(b => b.name.trim().toLowerCase() === indicadoPor.toLowerCase());
+
   try{
     await db.collection('orders').add({
       clientId: null, clientName: 'Venda balcão',
       clientPhone: '',
       items: [{itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd}],
       total, status:'entregue', source:'balcao',
-      barberId: barberRef?.id || null,
-      barberName: barberRef?.name || null,
-      comissaoPct: barberRef ? commissionPct : 0,
-      comissaoValor,
+      indicadoPor: indicadoPor || null,
+      barberId: barberMatch?.id || null,
+      barberName: indicadoPor || null,
+      comissaoPct, comissaoValor,
       entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
@@ -1772,7 +1811,7 @@ function renderComissoes(){
     const comissaoServicos = faturamentoServicos * (commissionPct/100);
 
     const pedidosIndicados = orders.filter(o=>{
-      if(o.barberId!==b.id || o.status!=='entregue') return false;
+      if((o.barberName||'').trim().toLowerCase() !== b.name.trim().toLowerCase() || o.status!=='entregue') return false;
       const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
       return t >= startMs;
     });
@@ -1814,7 +1853,147 @@ function renderComissoes(){
         </div>
       </div>` : `<p class="text-xs text-[var(--txt-dim)]">Sem meta semanal definida — edite o barbeiro em Equipe pra adicionar.</p>`}
     </div>`;
+  }).join('') + renderIndicacoesAvulsas(startMs);
+}
+function renderIndicacoesAvulsas(startMs){
+  const nomesBarbeiros = barbers.map(b=>b.name.trim().toLowerCase());
+  const avulsos = {};
+  orders.filter(o=>{
+    if(!o.barberName || o.status!=='entregue') return false;
+    if(nomesBarbeiros.includes(o.barberName.trim().toLowerCase())) return false; // já contado acima
+    const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
+    return t >= startMs;
+  }).forEach(o=>{
+    const nome = o.barberName.trim();
+    if(!avulsos[nome]) avulsos[nome] = {faturado:0, comissao:0, qtd:0};
+    avulsos[nome].faturado += o.total||0;
+    avulsos[nome].comissao += o.comissaoValor||0;
+    avulsos[nome].qtd += 1;
+  });
+  const nomes = Object.keys(avulsos);
+  if(nomes.length===0) return '';
+  return `
+    <p class="text-xs text-[var(--txt-dim)] uppercase tracking-wide mt-2 mb-1">Outras indicações (não cadastrados como barbeiro)</p>
+    ${nomes.map(nome=>`
+      <div class="card p-3 flex items-center justify-between">
+        <div>
+          <p class="font-semibold text-sm">${nome}</p>
+          <p class="text-xs text-[var(--txt-dim)]">${avulsos[nome].qtd} venda(s) · faturado: ${fmtBRL(avulsos[nome].faturado)}</p>
+        </div>
+        <p class="font-semibold text-sm text-[var(--ok)]">${fmtBRL(avulsos[nome].comissao)}</p>
+      </div>`).join('')}`;
+}
+
+// ---------------- MESAS (comandas) ----------------
+function renderMesas(){
+  const box = document.getElementById('mesasList');
+  if(!box) return;
+  if(mesasAbertas.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhuma mesa aberta no momento.</p>`; return; }
+  box.innerHTML = mesasAbertas.map(m=>{
+    const total = (m.itens||[]).reduce((s,it)=>s+(it.price*it.qty),0);
+    return `
+    <div class="card p-4">
+      <div class="flex items-center justify-between mb-2">
+        <p class="font-semibold"><i class="fa-solid fa-chair mr-2 text-[var(--gold)]"></i>${m.nome}</p>
+        <p class="font-display text-lg text-[var(--gold)]">${fmtBRL(total)}</p>
+      </div>
+      <div class="space-y-1 mb-3">
+        ${(m.itens||[]).length ? (m.itens||[]).map(it=>`
+          <div class="flex justify-between text-xs text-[var(--txt-dim)]">
+            <span>${it.qty}x ${it.name}</span><span>${fmtBRL(it.price*it.qty)}</span>
+          </div>`).join('') : `<p class="text-xs text-[var(--txt-dim)]">Nenhum item lançado ainda.</p>`}
+      </div>
+      <div class="flex gap-2">
+        <button onclick="openAdicionarItemMesa('${m.id}')" class="card-2 flex-1 py-2 rounded-xl text-sm"><i class="fa-solid fa-plus mr-1"></i>Adicionar item</button>
+        <button onclick="fecharMesaPrompt('${m.id}')" class="btn-gold flex-1 py-2 rounded-xl text-sm">Fechar Mesa</button>
+      </div>
+    </div>`;
   }).join('');
+}
+function abrirNovaMesa(){
+  const nome = prompt('Nome da mesa ou do cliente (ex: Mesa 1, João):');
+  if(!nome || !nome.trim()) return;
+  db.collection('mesas').add({
+    nome: nome.trim(), status:'aberta', itens:[],
+    abertaEm: firebase.firestore.FieldValue.serverTimestamp(),
+    abertaPor: currentUser.email
+  }).then(()=> toast('Mesa aberta!'));
+}
+function openAdicionarItemMesa(mesaId){
+  editingType = 'item-mesa';
+  editingId = mesaId;
+  const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
+  document.getElementById('genericModalTitle').textContent = 'Adicionar Item à Mesa';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <select id="mItemProduto" class="input" onchange="document.getElementById('mItemNomeLivre').classList.toggle('hide', this.value!=='__livre__')">
+        <option value="" disabled selected>Selecione o produto</option>
+        ${opcoesCatalogo}
+        <option value="__livre__">Outro item (digitar manualmente)</option>
+      </select>
+      <input id="mItemNomeLivre" class="input hide" placeholder="Nome do item">
+      <div class="grid grid-cols-2 gap-2">
+        <input id="mItemQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
+        <input id="mItemPreco" type="number" step="0.01" class="input" placeholder="Preço unitário (se avulso)">
+      </div>
+      <button onclick="confirmarAdicionarItemMesa()" class="btn-gold w-full py-3 rounded-xl mt-2">Adicionar à Mesa</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarAdicionarItemMesa(){
+  const mesaId = editingId;
+  const produtoId = document.getElementById('mItemProduto').value;
+  const qtd = parseInt(document.getElementById('mItemQtd').value)||1;
+  let itemName, precoUnit, catalogRef = null;
+  if(produtoId==='__livre__'){
+    itemName = document.getElementById('mItemNomeLivre').value.trim();
+    precoUnit = parseFloat(document.getElementById('mItemPreco').value)||0;
+    if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return; }
+  } else {
+    const item = catalogItems.find(i=>i.id===produtoId);
+    if(!item){ toast('Selecione um produto.', 'err'); return; }
+    itemName = item.name; precoUnit = item.price; catalogRef = item;
+  }
+  const mesa = mesasAbertas.find(m=>m.id===mesaId);
+  const novosItens = [...(mesa?.itens||[]), {itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd}];
+  try{
+    await db.collection('mesas').doc(mesaId).update({itens: novosItens});
+    if(catalogRef){
+      await db.collection('catalogItems').doc(catalogRef.id).update({
+        stock: Math.max(0, (catalogRef.stock||0) - qtd)
+      });
+    }
+    closeGenericModal();
+    toast('Item adicionado à mesa!');
+  }catch(e){ toast('Erro ao adicionar item.', 'err'); }
+}
+function fecharMesaPrompt(mesaId){
+  if(!confirmCancelPassword()){
+    toast('Senha incorreta. Fechamento não realizado.', 'err');
+    return;
+  }
+  fecharMesa(mesaId);
+}
+async function fecharMesa(mesaId){
+  const mesa = mesasAbertas.find(m=>m.id===mesaId);
+  if(!mesa) return;
+  const total = (mesa.itens||[]).reduce((s,it)=>s+(it.price*it.qty),0);
+  try{
+    if(total > 0){
+      await db.collection('orders').add({
+        clientId: null, clientName: `Mesa: ${mesa.nome}`,
+        clientPhone: '',
+        items: mesa.itens||[],
+        total, status:'entregue', source:'mesa',
+        entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    await db.collection('mesas').doc(mesaId).update({
+      status:'fechada', fechadaEm: firebase.firestore.FieldValue.serverTimestamp(), fechadaPor: currentUser.email
+    });
+    toast('Mesa fechada e lançada na venda do dia!');
+  }catch(e){ toast('Erro ao fechar mesa.', 'err'); }
 }
 
 // ---------------- GENERIC HELPERS ----------------
