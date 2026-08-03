@@ -357,6 +357,13 @@
   </div>
 </div>
 
+<!-- ======================= SCANNER DE CÓDIGO DE BARRAS (câmera) ======================= -->
+<div id="barcodeScannerModal" class="hide fixed inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center p-6">
+  <video id="scannerVideo" autoplay playsinline muted class="w-full max-w-sm rounded-2xl border-2 border-[var(--gold)]"></video>
+  <p class="text-white text-sm mt-5 text-center">Aponte a câmera para o código de barras do produto</p>
+  <button onclick="fecharScannerCamera()" class="mt-5 card-2 px-6 py-2.5 rounded-xl text-white">Cancelar</button>
+</div>
+
 <div id="toast" class="hide fixed top-5 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-xl text-sm font-semibold shadow-lg"></div>
 
 <script>
@@ -1211,8 +1218,16 @@ function vendaFormHtml(prefix){
   const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
   const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   return `
+    <div class="mb-3">
+      <label class="text-xs text-[var(--txt-dim)] block mb-1">Código de barras (bipe com o leitor ou use a câmera)</label>
+      <div class="flex gap-2">
+        <input id="${prefix}Barcode" class="input flex-1" placeholder="Aguardando leitura..." autofocus
+          onkeypress="if(event.key==='Enter'){event.preventDefault(); buscarPorCodigoBarras('${prefix}');}">
+        <button type="button" onclick="abrirScannerCamera('${prefix}Barcode', ()=>buscarPorCodigoBarras('${prefix}'))" class="card-2 px-4 rounded-xl"><i class="fa-solid fa-camera"></i></button>
+      </div>
+    </div>
     <select id="${prefix}Produto" class="input" onchange="onVendaProdutoChange('${prefix}')">
-      <option value="" disabled selected>Selecione o produto</option>
+      <option value="" disabled selected>Ou selecione o produto manualmente</option>
       ${opcoesCatalogo}
       <option value="__livre__">Outro item (digitar manualmente)</option>
     </select>
@@ -1244,6 +1259,66 @@ function vendaFormHtml(prefix){
       </div>
     </div>`;
 }
+function buscarPorCodigoBarras(prefix){
+  const input = document.getElementById(prefix+'Barcode');
+  const code = input.value.trim();
+  if(!code) return;
+  const item = catalogItems.find(i => i.barcode && i.barcode === code);
+  if(!item){
+    toast('Nenhum produto encontrado com esse código de barras.', 'err');
+    input.select();
+    return;
+  }
+  const select = document.getElementById(prefix+'Produto');
+  select.value = item.id;
+  onVendaProdutoChange(prefix);
+  input.value = '';
+  toast(`${item.name} adicionado!`);
+}
+
+// ---------------- SCANNER DE CÓDIGO DE BARRAS PELA CÂMERA ----------------
+let scannerStream = null;
+let scannerInterval = null;
+async function abrirScannerCamera(inputId, onDetected){
+  if(!('BarcodeDetector' in window)){
+    toast('Seu navegador não suporta leitura de código de barras pela câmera. Use um leitor USB/Bluetooth (ele "digita" o código sozinho) ou digite manualmente.', 'err');
+    return;
+  }
+  try{
+    scannerStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+  }catch(e){
+    toast('Não foi possível acessar a câmera. Verifique as permissões do navegador.', 'err');
+    return;
+  }
+  const video = document.getElementById('scannerVideo');
+  video.srcObject = scannerStream;
+  document.getElementById('barcodeScannerModal').classList.remove('hide');
+  let detector;
+  try{
+    detector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','qr_code']});
+  }catch(e){
+    detector = new BarcodeDetector();
+  }
+  scannerInterval = setInterval(async ()=>{
+    try{
+      const codes = await detector.detect(video);
+      if(codes && codes.length>0){
+        const code = codes[0].rawValue;
+        fecharScannerCamera();
+        const el = document.getElementById(inputId);
+        if(el) el.value = code;
+        if(onDetected) onDetected();
+        toast('Código lido: '+code);
+      }
+    }catch(err){ /* segue tentando no próximo frame */ }
+  }, 350);
+}
+function fecharScannerCamera(){
+  if(scannerInterval){ clearInterval(scannerInterval); scannerInterval = null; }
+  if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+  document.getElementById('barcodeScannerModal').classList.add('hide');
+}
+
 function onVendaProdutoChange(prefix){
   const produtoId = document.getElementById(prefix+'Produto').value;
   const isLivre = produtoId === '__livre__';
@@ -1693,6 +1768,7 @@ function renderAdminCatalog(){
         <p class="font-semibold text-sm">${i.name} ${!i.active?'<span class="text-[var(--danger)] text-xs">(inativo)</span>':''}</p>
         <p class="text-xs text-[var(--txt-dim)]">${CAT_LABELS[i.category]||i.category} · ${fmtBRL(i.price)} · estoque: ${i.stock??0}${i.stockMin>0?` (mín: ${i.stockMin})`:''}
           ${lowStock?' <span class="text-[var(--warn)] font-semibold">· ESTOQUE BAIXO</span>':''}</p>
+        ${i.barcode?`<p class="text-xs text-[var(--txt-dim)]"><i class="fa-solid fa-barcode mr-1"></i>${i.barcode}</p>`:''}
       </div>
       <div class="flex gap-2">
         <button onclick='openCatalogForm(${JSON.stringify(i).replace(/'/g,"&apos;")})' class="w-8 h-8 card-2 rounded-lg"><i class="fa-solid fa-pen text-xs"></i></button>
@@ -1707,6 +1783,13 @@ function openCatalogForm(i){
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <input id="fName" class="input" placeholder="Nome do item" value="${i?.name||''}">
+      <div>
+        <label class="text-xs text-[var(--txt-dim)] block mb-1">Código de barras (opcional)</label>
+        <div class="flex gap-2">
+          <input id="fBarcode" class="input flex-1" placeholder="Leia com o leitor ou digite" value="${i?.barcode||''}">
+          <button type="button" onclick="abrirScannerCamera('fBarcode')" class="card-2 px-3 rounded-xl"><i class="fa-solid fa-camera"></i></button>
+        </div>
+      </div>
       <div>
         <label class="text-xs text-[var(--txt-dim)] block mb-1">Categoria</label>
         <input id="fCategory" class="input" list="categoryOptions" placeholder="Ex: Jantinha, Bebida, Espetinho..." value="${i?.category||''}">
@@ -1746,6 +1829,7 @@ async function saveCatalogItem(){
   const data = {
     name: document.getElementById('fName').value.trim(),
     category: document.getElementById('fCategory').value.trim().toLowerCase() || 'outros',
+    barcode: document.getElementById('fBarcode').value.trim() || null,
     price: parseFloat(document.getElementById('fPrice').value)||0,
     stock: parseInt(document.getElementById('fStock').value)||0,
     stockMin: parseInt(document.getElementById('fStockMin').value)||0,
@@ -2011,6 +2095,7 @@ async function fecharMesa(mesaId){
 function closeGenericModal(){
   document.getElementById('genericModal').classList.add('hide');
   editingId = null; editingType = null;
+  if(scannerStream) fecharScannerCamera();
 }
 async function deleteDoc(collection, id){
   if(!confirm('Tem certeza que deseja excluir?')) return;
