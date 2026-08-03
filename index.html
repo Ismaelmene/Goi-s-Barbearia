@@ -174,6 +174,10 @@
   <!-- ---------- CATALOGO ---------- -->
   <section id="view-catalogo" class="hide px-5 pt-5 fade-in">
     <h2 class="font-display text-3xl mb-4">CATÁLOGO</h2>
+    <div class="relative mb-3">
+      <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[var(--txt-dim)] text-sm"></i>
+      <input id="catalogSearchInput" class="input pl-9" placeholder="Buscar produto pelo nome..." oninput="onCatalogSearchInput(this.value)">
+    </div>
     <div id="catCategoryChips" class="flex gap-2 overflow-x-auto scrollbar-none pb-3 mb-2"></div>
     <div id="catalogGrid" class="grid grid-cols-2 gap-3 mb-28"></div>
 
@@ -607,14 +611,21 @@ auth.onAuthStateChanged(async (user) => {
 function initClientListeners(){
   db.collection('services').where('active','==',true).onSnapshot(s=>{
     services = s.docs.map(d=>({id:d.id, ...d.data()}));
-    renderServiceList(); renderCatCategoryChips(); renderCatalogGrid();
+    renderServiceList();
   });
   db.collection('barbers').where('active','==',true).onSnapshot(s=>{
     barbers = s.docs.map(d=>({id:d.id, ...d.data()}));
   });
-  db.collection('catalogItems').where('active','==',true).onSnapshot(s=>{
-    catalogItems = s.docs.map(d=>({id:d.id, ...d.data()}));
-    renderCatCategoryChips(); renderCatalogGrid();
+  // Categorias do catálogo — 1 leitura só (documento único), não a coleção inteira
+  db.collection('settings').doc('catalogCategories').onSnapshot(s=>{
+    catalogCategoriesList = s.exists ? (s.data().list||[]) : [];
+    renderCatCategoryChips();
+    // Carrega a primeira categoria automaticamente se nenhuma estiver selecionada ainda
+    if(!activeCatCategory && catalogCategoriesList.length>0){
+      setCatCategory(catalogCategoriesList[0]);
+    } else if(catalogCategoriesList.length===0){
+      renderCatalogGrid();
+    }
   });
   db.collection('appointments').where('clientId','==',currentUser.uid)
     .onSnapshot(s=>{
@@ -909,26 +920,72 @@ async function confirmBooking(){
 // ======================================================================
 // CATÁLOGO (loja de conveniência / jantinhas)
 // ======================================================================
-let activeCatCategory = 'todos';
-const CAT_LABELS = {todos:'Todos', jantinha:'Jantinhas', espetinho:'Espetinhos', bebida:'Bebidas', conveniencia:'Conveniência', terere:'Tereré'};
+let activeCatCategory = null; // definida dinamicamente a partir das categorias existentes
+let catalogCategoriesList = [];
+let catalogUnsub = null; // listener da categoria atual, trocado a cada mudança
+let catalogSearchTimeout = null;
+const CAT_LABELS = {jantinha:'Jantinhas', espetinho:'Espetinhos', bebida:'Bebidas', conveniencia:'Conveniência', terere:'Tereré'};
 
 function renderCatCategoryChips(){
   const box = document.getElementById('catCategoryChips');
   if(!box) return;
-  const cats = ['todos', ...new Set(catalogItems.map(i=>i.category))];
-  box.innerHTML = cats.map(c=>`
-    <button onclick="setCatCategory('${c}')" class="chip ${activeCatCategory===c?'chip-active':''}">${CAT_LABELS[c]||c}</button>
+  if(catalogCategoriesList.length===0){ box.innerHTML = ''; return; }
+  box.innerHTML = catalogCategoriesList.map(c=>`
+    <button onclick="setCatCategory('${c}')" class="chip ${activeCatCategory===c?'chip-active':''}">${CAT_LABELS[c]||capitalize(c)}</button>
   `).join('');
 }
-function setCatCategory(c){ activeCatCategory = c; renderCatCategoryChips(); renderCatalogGrid(); }
+function setCatCategory(c){
+  activeCatCategory = c;
+  document.getElementById('catalogSearchInput').value = '';
+  renderCatCategoryChips();
+  // Troca o listener: só lê os itens DESSA categoria (economiza leituras do Firestore)
+  if(catalogUnsub) catalogUnsub();
+  catalogUnsub = db.collection('catalogItems')
+    .where('category','==', c)
+    .where('active','==', true)
+    .limit(60)
+    .onSnapshot(s=>{
+      catalogItems = s.docs.map(d=>({id:d.id, ...d.data()}));
+      renderCatalogGrid();
+    });
+}
+// Busca por nome — usa um campo nameLower e uma consulta por intervalo (só lê os itens que batem, não a coleção inteira)
+function onCatalogSearchInput(term){
+  clearTimeout(catalogSearchTimeout);
+  catalogSearchTimeout = setTimeout(()=> runCatalogSearch(term.trim()), 350);
+}
+async function runCatalogSearch(term){
+  if(!term){
+    // Busca vazia: volta pra visão por categoria normal
+    if(activeCatCategory) setCatCategory(activeCatCategory);
+    return;
+  }
+  if(catalogUnsub){ catalogUnsub(); catalogUnsub = null; }
+  const termLower = term.toLowerCase();
+  try{
+    const snap = await db.collection('catalogItems')
+      .where('active','==', true)
+      .where('nameLower','>=', termLower)
+      .where('nameLower','<=', termLower + '\uf8ff')
+      .limit(30)
+      .get();
+    catalogItems = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    document.querySelectorAll('#catCategoryChips .chip').forEach(b=>b.classList.remove('chip-active'));
+    renderCatalogGrid();
+  }catch(e){
+    toast('Erro ao buscar produtos.', 'err');
+  }
+}
 
 function renderCatalogGrid(){
   const box = document.getElementById('catalogGrid');
   if(!box) return;
-  let items = catalogItems;
-  if(activeCatCategory!=='todos') items = items.filter(i=>i.category===activeCatCategory);
-  if(items.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)] col-span-2">Nenhum item disponível.</p>`; return; }
-  box.innerHTML = items.map(i=>{
+  if(catalogCategoriesList.length===0){
+    box.innerHTML = `<p class="text-sm text-[var(--txt-dim)] col-span-2">Catálogo ainda não foi configurado.</p>`;
+    return;
+  }
+  if(catalogItems.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)] col-span-2">Nenhum item encontrado.</p>`; return; }
+  box.innerHTML = catalogItems.map(i=>{
     const inCart = cart.find(c=>c.itemId===i.id);
     const outOfStock = (i.stock||0) <= 0;
     return `
@@ -1896,8 +1953,13 @@ async function saveCatalogItem(){
     active: document.getElementById('fActive').checked
   };
   if(!data.name){ toast('Informe o nome do item.', 'err'); return; }
+  data.nameLower = data.name.toLowerCase();
   if(editingId){ await db.collection('catalogItems').doc(editingId).update(data); }
   else{ data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); await db.collection('catalogItems').add(data); }
+  // Mantém a lista de categorias atualizada (documento único, leitura leve pro cliente)
+  await db.collection('settings').doc('catalogCategories').set({
+    list: firebase.firestore.FieldValue.arrayUnion(data.category)
+  }, {merge:true});
   closeGenericModal(); toast('Item salvo!');
 }
 
@@ -1947,8 +2009,12 @@ async function seedGoiasBarbearia(){
     });
     GOIAS_CATALOG_SEED.forEach(i=>{
       const ref = db.collection('catalogItems').doc();
-      batch.set(ref, {...i, imageUrl:'', active:true, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+      batch.set(ref, {...i, nameLower: i.name.toLowerCase(), imageUrl:'', active:true, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
     });
+    const categoriasUnicas = [...new Set(GOIAS_CATALOG_SEED.map(i=>i.category))];
+    batch.set(db.collection('settings').doc('catalogCategories'), {
+      list: firebase.firestore.FieldValue.arrayUnion(...categoriasUnicas)
+    }, {merge:true});
     await batch.commit();
     toast('Cardápio importado! Agora cadastre os barbeiros em Equipe.');
   }catch(e){
