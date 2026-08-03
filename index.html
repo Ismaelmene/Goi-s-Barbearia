@@ -74,11 +74,15 @@
 
       <div id="registerFields" class="hide space-y-3 mb-3">
         <input id="regName" class="input" placeholder="Nome completo">
-        <input id="regPhone" class="input" placeholder="WhatsApp (66) 99999-0000">
       </div>
 
-      <div class="space-y-3">
+      <div id="clientPhoneField" class="space-y-3">
+        <input id="authPhone" class="input" placeholder="Celular (DDD + número)" inputmode="numeric">
+      </div>
+      <div id="adminEmailField" class="hide space-y-3">
         <input id="authEmail" type="email" class="input" placeholder="E-mail">
+      </div>
+      <div class="space-y-3 mt-3">
         <input id="authPass" type="password" class="input" placeholder="Senha">
       </div>
 
@@ -258,6 +262,8 @@
     <!-- CAIXA -->
     <div id="caixaCard" class="card p-4 mb-5"></div>
 
+    <div id="contasAlertBox" class="mb-5"></div>
+
     <div id="aguardandoConfirmBox" class="mb-5"></div>
 
     <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Pedidos em aberto</h3>
@@ -309,9 +315,11 @@
   <!-- ---------- RELATÓRIOS (resumo + comissões) ---------- -->
   <section id="admin-relatorios" class="hide px-5 pt-5 fade-in pb-10">
     <h2 class="font-display text-3xl mb-4">RELATÓRIOS</h2>
-    <div class="flex gap-2 mb-4">
+    <div class="flex gap-2 mb-4 overflow-x-auto scrollbar-none">
       <button id="relTabResumo" onclick="setRelatorioTab('resumo')" class="chip chip-active">Resumo</button>
       <button id="relTabComissoes" onclick="setRelatorioTab('comissoes')" class="chip">Comissões</button>
+      <button id="relTabLucro" onclick="setRelatorioTab('lucro')" class="chip">Lucratividade</button>
+      <button id="relTabContas" onclick="setRelatorioTab('contas')" class="chip">Contas a Pagar</button>
     </div>
 
     <div id="relatorioResumo">
@@ -330,12 +338,18 @@
     </div>
 
     <div id="relatorioComissoes" class="hide">
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex gap-2">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex gap-2 overflow-x-auto scrollbar-none">
           <button id="comTabDia" onclick="setComissaoPeriodo('dia')" class="chip chip-active">Hoje</button>
           <button id="comTabSemana" onclick="setComissaoPeriodo('semana')" class="chip">Semana</button>
           <button id="comTabMes" onclick="setComissaoPeriodo('mes')" class="chip">Mês</button>
+          <button id="comTabPesquisar" onclick="setComissaoPeriodo('pesquisar')" class="chip">Pesquisar data</button>
         </div>
+      </div>
+      <div id="comissaoCustomRange" class="hide grid grid-cols-2 gap-2 mb-4">
+        <input id="comissaoDataInicio" type="date" class="input">
+        <input id="comissaoDataFim" type="date" class="input">
+        <button onclick="buscarComissaoPorData()" class="btn-gold col-span-2 py-2 rounded-xl text-sm">Buscar</button>
       </div>
       <div id="comissoesList" class="space-y-3 mb-5"></div>
 
@@ -344,6 +358,29 @@
         <button onclick="fecharMesComissao()" class="card-2 px-3 py-1.5 rounded-lg text-xs"><i class="fa-solid fa-box-archive mr-1"></i>Fechar mês atual</button>
       </div>
       <div id="comissaoHistoricoList" class="space-y-2"></div>
+    </div>
+
+    <div id="relatorioLucro" class="hide">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex gap-2 overflow-x-auto scrollbar-none">
+          <button id="lucroTabDia" onclick="setLucroPeriodo('dia')" class="chip chip-active">Hoje</button>
+          <button id="lucroTabSemana" onclick="setLucroPeriodo('semana')" class="chip">Semana</button>
+          <button id="lucroTabMes" onclick="setLucroPeriodo('mes')" class="chip">Mês</button>
+          <button id="lucroTabPesquisar" onclick="setLucroPeriodo('pesquisar')" class="chip">Pesquisar data</button>
+        </div>
+      </div>
+      <div id="lucroCustomRange" class="hide grid grid-cols-2 gap-2 mb-4">
+        <input id="lucroDataInicio" type="date" class="input">
+        <input id="lucroDataFim" type="date" class="input">
+        <button onclick="buscarLucroPorData()" class="btn-gold col-span-2 py-2 rounded-xl text-sm">Buscar</button>
+      </div>
+      <div id="lucroResumoBox" class="card p-4 mb-4"></div>
+      <div id="lucroList" class="space-y-2"></div>
+    </div>
+
+    <div id="relatorioContas" class="hide">
+      <button onclick="openContaPagarForm()" class="btn-gold w-full py-2.5 rounded-xl text-sm mb-4"><i class="fa-solid fa-plus mr-1"></i>Nova Conta a Pagar</button>
+      <div id="contasPagarList" class="space-y-2"></div>
     </div>
 
     <!-- Uso interno — visível só para os e-mails em SUPER_ADMIN_EMAILS -->
@@ -421,7 +458,8 @@ const firebaseConfig = {
 // Ex: const ADMIN_EMAILS = ["voce@gmail.com", "donodabarbearia@gmail.com"];
 const ADMIN_EMAILS = [
   "agrosafra7@gmail.com",
-  "menezesapptec@gmail.com"
+  "menezesapptec@gmail.com",
+  "lucassouzas993@gmail.com"
 ];
 
 // E-mails com acesso ao botão de RESET TOTAL do sistema (dados de teste).
@@ -519,6 +557,10 @@ function toast(msg, type="ok"){
 }
 
 // ---------------- AUTH ----------------
+// Domínio interno usado pra transformar o celular do cliente num "e-mail" válido pro Firebase Auth
+// (o cliente nunca vê isso, só digita o número normalmente)
+const CLIENT_AUTH_DOMAIN = '@goiasbarbearia.cliente';
+
 function setAuthTab(mode){
   authMode = mode;
   document.getElementById('authTabLogin').classList.toggle('bg-[var(--gold)]', mode==='login');
@@ -536,42 +578,52 @@ function showAdminLogin(){
   adminLoginMode = true;
   setAuthTab('login');
   document.getElementById('authTabRegister').classList.add('hide');
+  document.getElementById('clientPhoneField').classList.add('hide');
+  document.getElementById('adminEmailField').classList.remove('hide');
   toast('Modo de acesso do proprietário', 'ok');
 }
 
 async function submitAuth(){
-  const email = document.getElementById('authEmail').value.trim();
   const pass = document.getElementById('authPass').value;
   const errBox = document.getElementById('authError');
   errBox.classList.add('hide');
-  if(!email || !pass){ errBox.textContent = "Preencha e-mail e senha."; errBox.classList.remove('hide'); return; }
+
+  let email, phone;
+  if(adminLoginMode){
+    email = document.getElementById('authEmail').value.trim();
+    if(!email || !pass){ errBox.textContent = "Preencha e-mail e senha."; errBox.classList.remove('hide'); return; }
+  } else {
+    phone = document.getElementById('authPhone').value.replace(/\D/g,'');
+    if(phone.length < 10){ errBox.textContent = "Digite um celular válido, com DDD."; errBox.classList.remove('hide'); return; }
+    if(!pass){ errBox.textContent = "Digite a senha."; errBox.classList.remove('hide'); return; }
+    email = phone + CLIENT_AUTH_DOMAIN;
+  }
 
   try{
     if(authMode === 'register' && !adminLoginMode){
       const name = document.getElementById('regName').value.trim();
-      const phone = document.getElementById('regPhone').value.trim();
-      if(!name || !phone){ errBox.textContent = "Preencha nome e WhatsApp."; errBox.classList.remove('hide'); return; }
+      if(!name){ errBox.textContent = "Preencha o nome."; errBox.classList.remove('hide'); return; }
       const cred = await auth.createUserWithEmailAndPassword(email, pass);
       await db.collection('users').doc(cred.user.uid).set({
-        name, phone, email, role: 'client', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        name, phone, role: 'client', createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
     } else {
       await auth.signInWithEmailAndPassword(email, pass);
     }
   }catch(e){
-    errBox.textContent = translateAuthError(e.code);
+    errBox.textContent = translateAuthError(e.code, adminLoginMode);
     errBox.classList.remove('hide');
   }
 }
 
-function translateAuthError(code){
+function translateAuthError(code, isAdmin){
   const map = {
-    'auth/email-already-in-use':'Este e-mail já está cadastrado.',
-    'auth/invalid-email':'E-mail inválido.',
+    'auth/email-already-in-use': isAdmin ? 'Este e-mail já está cadastrado.' : 'Esse número de celular já tem cadastro. Tente entrar em vez de criar conta.',
+    'auth/invalid-email': isAdmin ? 'E-mail inválido.' : 'Número de celular inválido.',
     'auth/weak-password':'A senha precisa ter pelo menos 6 caracteres.',
-    'auth/user-not-found':'Usuário não encontrado.',
+    'auth/user-not-found': isAdmin ? 'Usuário não encontrado.' : 'Não encontramos cadastro com esse celular.',
     'auth/wrong-password':'Senha incorreta.',
-    'auth/invalid-credential':'E-mail ou senha incorretos.'
+    'auth/invalid-credential': isAdmin ? 'E-mail ou senha incorretos.' : 'Celular ou senha incorretos.'
   };
   return map[code] || 'Erro ao autenticar. Tente novamente.';
 }
@@ -604,6 +656,8 @@ auth.onAuthStateChanged(async (user) => {
     document.getElementById('adminApp').classList.add('hide');
     document.getElementById('authScreen').classList.remove('hide');
     document.getElementById('authTabRegister').classList.remove('hide');
+    document.getElementById('clientPhoneField').classList.remove('hide');
+    document.getElementById('adminEmailField').classList.add('hide');
   }
 });
 
@@ -645,6 +699,8 @@ function initAdminListeners(){
   const resetBox = document.getElementById('resetSuperAdminBox');
   if(resetBox) resetBox.classList.toggle('hide', !SUPER_ADMIN_EMAILS.includes(currentUser.email));
   initComissaoHistoricoListener();
+  initValesListener();
+  initContasPagarListener();
   db.collection('services').onSnapshot(s=>{
     services = s.docs.map(d=>({id:d.id, ...d.data()}));
     renderAdminServices();
@@ -1132,9 +1188,15 @@ function goToAdmin(view){
 function setRelatorioTab(tab){
   document.getElementById('relTabResumo').classList.toggle('chip-active', tab==='resumo');
   document.getElementById('relTabComissoes').classList.toggle('chip-active', tab==='comissoes');
+  document.getElementById('relTabLucro').classList.toggle('chip-active', tab==='lucro');
+  document.getElementById('relTabContas').classList.toggle('chip-active', tab==='contas');
   document.getElementById('relatorioResumo').classList.toggle('hide', tab!=='resumo');
   document.getElementById('relatorioComissoes').classList.toggle('hide', tab!=='comissoes');
+  document.getElementById('relatorioLucro').classList.toggle('hide', tab!=='lucro');
+  document.getElementById('relatorioContas').classList.toggle('hide', tab!=='contas');
   if(tab==='comissoes') renderComissoes();
+  if(tab==='lucro') renderLucratividade();
+  if(tab==='contas') renderContasPagar();
 }
 
 // ---------------- DASHBOARD ----------------
@@ -1275,6 +1337,21 @@ function calcularVendasCaixa(){
   }).reduce((s,a)=>s+(a.price||0),0);
   return vendasOrders + vendasAppts;
 }
+const PAYMENT_LABELS = {dinheiro:'Dinheiro', credito:'Cartão Crédito', debito:'Cartão Débito', outros:'Outros (Pix, etc.)'};
+function calcularVendasPorPagamento(){
+  if(!caixaAtual) return {};
+  const aberturaMs = caixaAtual.abertoEm?.toDate ? caixaAtual.abertoEm.toDate().getTime() : 0;
+  const porPagamento = {};
+  orders.filter(o=>{
+    if(o.status!=='entregue') return false;
+    const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
+    return t >= aberturaMs;
+  }).forEach(o=>{
+    const metodo = o.paymentMethod || 'dinheiro';
+    porPagamento[metodo] = (porPagamento[metodo]||0) + (o.total||0);
+  });
+  return porPagamento;
+}
 function abrirCaixaPrompt(){
   editingType = 'abrir-caixa';
   document.getElementById('genericModalTitle').textContent = 'Abrir Caixa';
@@ -1299,6 +1376,7 @@ async function confirmarAbrirCaixa(){
 function fecharCaixaPrompt(){
   const vendas = calcularVendasCaixa();
   const totalEsperado = (caixaAtual.valorAbertura||0) + vendas;
+  const porPagamento = calcularVendasPorPagamento();
   editingType = 'fechar-caixa';
   document.getElementById('genericModalTitle').textContent = 'Fechar Caixa';
   document.getElementById('genericModalBody').innerHTML = `
@@ -1307,6 +1385,11 @@ function fecharCaixaPrompt(){
         <div class="flex justify-between"><span class="text-[var(--txt-dim)]">Valor de abertura</span><span>${fmtBRL(caixaAtual.valorAbertura)}</span></div>
         <div class="flex justify-between"><span class="text-[var(--txt-dim)]">Vendas no período</span><span>${fmtBRL(vendas)}</span></div>
         <div class="flex justify-between font-bold pt-1 border-t border-[var(--line)]"><span>Total esperado em caixa</span><span>${fmtBRL(totalEsperado)}</span></div>
+      </div>
+      <div class="card-2 p-3 text-sm space-y-1">
+        <p class="text-xs text-[var(--txt-dim)] mb-1">Vendas de produtos por forma de pagamento</p>
+        ${Object.keys(porPagamento).length===0 ? '<p class="text-xs text-[var(--txt-dim)]">Nenhuma venda de produto registrada.</p>' :
+          Object.entries(porPagamento).map(([m,v])=>`<div class="flex justify-between"><span>${PAYMENT_LABELS[m]||m}</span><span>${fmtBRL(v)}</span></div>`).join('')}
       </div>
       <label class="text-xs text-[var(--txt-dim)]">Valor contado no caixa (conferência)</label>
       <input id="valorFechamento" type="number" step="0.01" class="input" value="${totalEsperado.toFixed(2)}">
@@ -1317,10 +1400,12 @@ function fecharCaixaPrompt(){
 async function confirmarFecharCaixa(){
   const valorContado = parseFloat(document.getElementById('valorFechamento').value)||0;
   const vendas = calcularVendasCaixa();
+  const porPagamento = calcularVendasPorPagamento();
   await db.collection('caixaSessions').doc(caixaAtual.id).update({
     status:'fechado',
     valorFechamento: valorContado,
     totalVendas: vendas,
+    vendasPorPagamento: porPagamento,
     fechadoEm: firebase.firestore.FieldValue.serverTimestamp(),
     fechadoPor: currentUser.email
   });
@@ -1360,6 +1445,15 @@ function vendaFormHtml(prefix){
     </div>
     <div class="card-2 p-2 flex justify-between text-sm font-semibold mt-3">
       <span>Total</span><span id="${prefix}TotalDisplay">R$ 0,00</span>
+    </div>
+    <div class="mt-3">
+      <label class="text-xs text-[var(--txt-dim)] block mb-1">Forma de pagamento</label>
+      <select id="${prefix}Pagamento" class="input">
+        <option value="dinheiro">Dinheiro</option>
+        <option value="credito">Cartão de Crédito</option>
+        <option value="debito">Cartão de Débito</option>
+        <option value="outros">Outros (Pix, etc.)</option>
+      </select>
     </div>
     <div class="pt-3 mt-3 border-t border-[var(--line)]">
       <label class="text-xs text-[var(--txt-dim)] block mb-1">Comissão — escolha um barbeiro/colaborador cadastrado (opcional)</label>
@@ -1462,6 +1556,7 @@ function lerVendaForm(prefix){
   const produtoId = document.getElementById(prefix+'Produto').value;
   const qtd = parseInt(document.getElementById(prefix+'Qtd').value)||1;
   const desconto = parseFloat(document.getElementById(prefix+'Desconto').value)||0;
+  const paymentMethod = document.getElementById(prefix+'Pagamento').value;
   const barberId = document.getElementById(prefix+'Barbeiro').value;
   const barberRef = barberId ? barbers.find(b=>b.id===barberId) : null;
   const pctDigitado = parseFloat(document.getElementById(prefix+'ComissaoPct').value) || 0;
@@ -1483,7 +1578,7 @@ function lerVendaForm(prefix){
     if(pctDigitado > 0){ comissaoPct = pctDigitado; comissaoValor = total*(pctDigitado/100); }
     else if(valorDigitado > 0){ comissaoValor = valorDigitado; comissaoPct = null; }
   }
-  return {itemName, precoUnit: finalUnitPrice, precoOriginal: precoUnit, qtd, desconto, total, catalogRef, barberRef, comissaoPct, comissaoValor};
+  return {itemName, precoUnit: finalUnitPrice, precoOriginal: precoUnit, qtd, desconto, total, paymentMethod, catalogRef, barberRef, comissaoPct, comissaoValor};
 }
 
 function openLancarVenda(){
@@ -1499,7 +1594,7 @@ function openLancarVenda(){
 async function confirmarVendaManual(){
   const dados = lerVendaForm('v');
   if(!dados) return;
-  const {itemName, precoUnit, qtd, desconto, total, catalogRef, barberRef, comissaoPct, comissaoValor} = dados;
+  const {itemName, precoUnit, qtd, desconto, total, paymentMethod, catalogRef, barberRef, comissaoPct, comissaoValor} = dados;
   try{
     await db.collection('orders').add({
       clientId: null, clientName: 'Venda balcão',
@@ -1509,7 +1604,7 @@ async function confirmarVendaManual(){
         barberId: barberRef?.id||null, barberName: barberRef?.name||null,
         comissaoPct, comissaoValor
       }],
-      total, desconto, status:'entregue', source:'balcao',
+      total, desconto, paymentMethod, status:'entregue', source:'balcao',
       barberId: barberRef?.id || null,
       barberName: barberRef?.name || null,
       comissaoPct, comissaoValor,
@@ -1553,7 +1648,9 @@ function adminAppointmentRow(a){
   <div class="card p-3 flex items-center justify-between">
     <div>
       <p class="font-semibold text-sm">${a.time} · ${a.serviceName}</p>
-      <p class="text-xs text-[var(--txt-dim)]">${a.clientName} · ${a.barberName}</p>
+      <p class="text-xs text-[var(--txt-dim)]">${a.clientName} · ${a.barberName} · <span class="text-[var(--gold)]">${fmtBRL(a.price)}</span>
+        <button onclick="editarValorAgendamento('${a.id}')" class="text-[var(--txt-dim)] ml-1"><i class="fa-solid fa-pen text-[10px]"></i></button>
+      </p>
     </div>
     <select onchange="updateApptStatus('${a.id}', this.value, this)" class="input !w-auto text-xs py-1.5">
       <option value="aguardando" ${a.status==='aguardando'?'selected':''}>Aguardando</option>
@@ -1562,6 +1659,16 @@ function adminAppointmentRow(a){
       <option value="cancelado" ${a.status==='cancelado'?'selected':''}>Cancelado</option>
     </select>
   </div>`;
+}
+async function editarValorAgendamento(id){
+  const appt = appointments.find(a=>a.id===id);
+  if(!appt) return;
+  const novoValor = prompt('Novo valor cobrado (R$):', appt.price);
+  if(novoValor===null) return;
+  const valor = parseFloat(novoValor.replace(',','.'));
+  if(isNaN(valor) || valor<0){ toast('Valor inválido.', 'err'); return; }
+  await db.collection('appointments').doc(id).update({price: valor});
+  toast('Valor atualizado!');
 }
 function adminOrderRow(o){
   const entregaLabel = o.deliveryType==='entrega' ? `<i class="fa-solid fa-motorcycle mr-1"></i>Entrega${o.address?': '+o.address:''}` : (o.deliveryType==='retirada' ? '<i class="fa-solid fa-store mr-1"></i>Retirada no balcão' : '');
@@ -1912,7 +2019,16 @@ function openCatalogForm(i){
           ${[...new Set(['jantinha','espetinho','bebida','conveniencia','terere', ...catalogItems.map(c=>c.category)])].map(c=>`<option value="${c}">${CAT_LABELS[c]||c}</option>`).join('')}
         </datalist>
       </div>
-      <input id="fPrice" type="number" step="0.01" class="input" placeholder="Preço (R$)" value="${i?.price||''}">
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-[var(--txt-dim)] block mb-1">Preço de compra (R$)</label>
+          <input id="fCostPrice" type="number" step="0.01" class="input" placeholder="Quanto você paga" value="${i?.costPrice??''}">
+        </div>
+        <div>
+          <label class="text-xs text-[var(--txt-dim)] block mb-1">Preço de venda (R$)</label>
+          <input id="fPrice" type="number" step="0.01" class="input" placeholder="Quanto o cliente paga" value="${i?.price||''}">
+        </div>
+      </div>
       <div class="grid grid-cols-2 gap-2">
         <div>
           <label class="text-xs text-[var(--txt-dim)] block mb-1">Estoque atual</label>
@@ -1946,6 +2062,7 @@ async function saveCatalogItem(){
     category: document.getElementById('fCategory').value.trim().toLowerCase() || 'outros',
     barcode: document.getElementById('fBarcode').value.trim() || null,
     price: parseFloat(document.getElementById('fPrice').value)||0,
+    costPrice: parseFloat(document.getElementById('fCostPrice').value)||0,
     stock: parseInt(document.getElementById('fStock').value)||0,
     stockMin: parseInt(document.getElementById('fStockMin').value)||0,
     commissionPct: parseFloat(document.getElementById('fCommissionProduto').value)||0,
@@ -2026,12 +2143,30 @@ async function seedGoiasBarbearia(){
 
 // ---------------- COMISSÕES E METAS ----------------
 let comissaoPeriodo = 'dia';
+let comissaoCustomStart = '', comissaoCustomEnd = '';
 function setComissaoPeriodo(p){
   comissaoPeriodo = p;
   document.getElementById('comTabDia').classList.toggle('chip-active', p==='dia');
   document.getElementById('comTabSemana').classList.toggle('chip-active', p==='semana');
   document.getElementById('comTabMes').classList.toggle('chip-active', p==='mes');
+  document.getElementById('comTabPesquisar').classList.toggle('chip-active', p==='pesquisar');
+  document.getElementById('comissaoCustomRange').classList.toggle('hide', p!=='pesquisar');
+  if(p!=='pesquisar') renderComissoes();
+}
+function buscarComissaoPorData(){
+  comissaoCustomStart = document.getElementById('comissaoDataInicio').value;
+  comissaoCustomEnd = document.getElementById('comissaoDataFim').value;
+  if(!comissaoCustomStart){ toast('Escolha ao menos a data de início.', 'err'); return; }
   renderComissoes();
+}
+function getPeriodRangeMs(p){
+  const now = new Date();
+  if(p==='pesquisar'){
+    const start = comissaoCustomStart ? new Date(comissaoCustomStart+'T00:00:00').getTime() : 0;
+    const end = comissaoCustomEnd ? new Date(comissaoCustomEnd+'T23:59:59').getTime() : Date.now();
+    return {startMs: start, endMs: end};
+  }
+  return {startMs: getPeriodStart(p).getTime(), endMs: Date.now()};
 }
 function getPeriodStart(p){
   const now = new Date();
@@ -2047,33 +2182,39 @@ function getWeekStart(){
   monday.setHours(0,0,0,0);
   return monday;
 }
-// Calcula os números de comissão de cada barbeiro a partir de um timestamp de início (reutilizado no relatório e no fechamento de mês)
-function calcularComissaoPorBarbeiro(startMs){
+// Calcula os números de comissão de cada barbeiro dentro de um intervalo (reutilizado no relatório e no fechamento de mês)
+function calcularComissaoPorBarbeiro(startMs, endMs){
+  endMs = endMs || Date.now();
   const pedidosPeriodo = orders.filter(o=>o.status==='entregue').map(o=>({
     order:o,
     t: o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0)
-  })).filter(x=>x.t >= startMs);
+  })).filter(x=>x.t >= startMs && x.t <= endMs);
 
   return barbers.map(b=>{
     const commissionPct = b.commissionPct||0;
     const apptsPeriodo = appointments.filter(a=>{
       if(a.barberId!==b.id || a.status!=='concluido') return false;
       const t = a.concluidoEm?.toDate ? a.concluidoEm.toDate().getTime() : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
-      return t >= startMs;
+      return t >= startMs && t <= endMs;
     });
     const faturamentoServicos = apptsPeriodo.reduce((s,a)=>s+(a.price||0),0);
     const comissaoServicos = faturamentoServicos * (commissionPct/100);
 
     let faturamentoIndicacoes = 0, comissaoIndicacoes = 0, qtdIndicacoes = 0;
-    pedidosPeriodo.forEach(({order})=>{
+    const linhas = apptsPeriodo.map(a=>({
+      tipo:'servico', descricao: a.serviceName, data: a.date, valor: a.price||0, comissao: (a.price||0)*(commissionPct/100)
+    }));
+    pedidosPeriodo.forEach(({order,t})=>{
       (order.items||[]).forEach(it=>{
         if(it.barberId===b.id){
           faturamentoIndicacoes += (it.price||0)*(it.qty||1);
           comissaoIndicacoes += it.comissaoValor||0;
           qtdIndicacoes += 1;
+          linhas.push({tipo:'produto', descricao: `${it.qty}x ${it.name}`, data: new Date(t).toLocaleDateString('pt-BR'), valor: (it.price||0)*(it.qty||1), comissao: it.comissaoValor||0});
         }
       });
     });
+    linhas.sort((x,y)=> x.data < y.data ? 1 : -1);
 
     const totalComissao = comissaoServicos + comissaoIndicacoes;
     const totalFaturado = faturamentoServicos + faturamentoIndicacoes;
@@ -2081,7 +2222,8 @@ function calcularComissaoPorBarbeiro(startMs){
       barberId: b.id, barberName: b.name, commissionPct,
       qtdAtendimentos: apptsPeriodo.length, qtdIndicacoes,
       faturamentoServicos, faturamentoIndicacoes,
-      totalComissao, totalFaturado, totalBarbearia: totalFaturado - totalComissao
+      totalComissao, totalFaturado, totalBarbearia: totalFaturado - totalComissao,
+      linhas
     };
   });
 }
@@ -2089,13 +2231,13 @@ function renderComissoes(){
   const box = document.getElementById('comissoesList');
   if(!box) return;
   if(barbers.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Cadastre barbeiros em Equipe para ver o relatório de comissões.</p>`; return; }
-  const startMs = getPeriodStart(comissaoPeriodo).getTime();
+  const {startMs, endMs} = getPeriodRangeMs(comissaoPeriodo);
   const weekStartMs = getWeekStart().getTime();
-  const dadosPorBarbeiro = calcularComissaoPorBarbeiro(startMs);
+  const dadosPorBarbeiro = calcularComissaoPorBarbeiro(startMs, endMs);
 
   box.innerHTML = barbers.map(b=>{
     const dados = dadosPorBarbeiro.find(d=>d.barberId===b.id);
-    const {commissionPct, qtdAtendimentos, qtdIndicacoes, totalComissao, totalFaturado, totalBarbearia} = dados;
+    const {commissionPct, qtdAtendimentos, qtdIndicacoes, totalComissao, totalFaturado, totalBarbearia, linhas} = dados;
 
     const apptsSemana = appointments.filter(a=>{
       if(a.barberId!==b.id || a.status!=='concluido') return false;
@@ -2105,6 +2247,14 @@ function renderComissoes(){
     const faturamentoSemana = apptsSemana.reduce((s,a)=>s+(a.price||0),0);
     const meta = b.metaSemanal||0;
     const progressoPct = meta>0 ? Math.min(100, (faturamentoSemana/meta)*100) : 0;
+
+    const valesPeriodo = vales.filter(v=>{
+      if(v.barberId!==b.id) return false;
+      const t = v.criadoEm?.toDate ? v.criadoEm.toDate().getTime() : 0;
+      return t >= startMs && t <= endMs;
+    });
+    const totalVales = valesPeriodo.reduce((s,v)=>s+(v.valor||0),0);
+    const comissaoLiquida = totalComissao - totalVales;
 
     return `
     <div class="card p-4">
@@ -2116,20 +2266,244 @@ function renderComissoes(){
         <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Atendimentos</p><p class="font-semibold">${qtdAtendimentos}</p></div>
         <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Indicações de produto</p><p class="font-semibold">${qtdIndicacoes}</p></div>
         <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Faturado (total)</p><p class="font-semibold">${fmtBRL(totalFaturado)}</p></div>
-        <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Comissão dele</p><p class="font-semibold text-[var(--ok)]">${fmtBRL(totalComissao)}</p></div>
+        <div class="card-2 p-2"><p class="text-xs text-[var(--txt-dim)]">Comissão bruta</p><p class="font-semibold text-[var(--ok)]">${fmtBRL(totalComissao)}</p></div>
       </div>
+      ${totalVales>0 ? `
+      <div class="card-2 p-2 flex justify-between text-sm mb-2">
+        <span class="text-[var(--txt-dim)]">Vales retirados no período</span><span class="text-[var(--danger)]">- ${fmtBRL(totalVales)}</span>
+      </div>
+      <div class="card-2 p-2 flex justify-between text-sm mb-3 font-semibold">
+        <span>Comissão líquida (a receber)</span><span class="text-[var(--ok)]">${fmtBRL(comissaoLiquida)}</span>
+      </div>` : ''}
       <p class="text-xs text-[var(--txt-dim)] mb-3">Fica pra barbearia: <span class="text-[var(--gold)] font-semibold">${fmtBRL(totalBarbearia)}</span></p>
       ${meta>0 ? `
-      <div>
+      <div class="mb-3">
         <div class="flex justify-between text-xs text-[var(--txt-dim)] mb-1">
           <span>Meta semanal: ${fmtBRL(meta)}</span><span>${fmtBRL(faturamentoSemana)} (${progressoPct.toFixed(0)}%)</span>
         </div>
         <div class="w-full h-2 rounded-full bg-[var(--panel-2)] overflow-hidden">
           <div class="h-full bg-[var(--gold)]" style="width:${progressoPct}%"></div>
         </div>
-      </div>` : `<p class="text-xs text-[var(--txt-dim)]">Sem meta semanal definida — edite o barbeiro em Equipe pra adicionar.</p>`}
+      </div>` : `<p class="text-xs text-[var(--txt-dim)] mb-3">Sem meta semanal definida — edite o barbeiro em Equipe pra adicionar.</p>`}
+      <div class="flex gap-2 mb-3">
+        <button onclick="openRegistrarVale('${b.id}','${b.name.replace(/'/g,"&apos;")}')" class="card-2 flex-1 py-2 rounded-lg text-xs"><i class="fa-solid fa-hand-holding-dollar mr-1"></i>Registrar Vale</button>
+      </div>
+      ${valesPeriodo.length>0 ? `
+      <details class="mb-2">
+        <summary class="text-xs text-[var(--txt-dim)] cursor-pointer mb-1">Vales do período (${valesPeriodo.length})</summary>
+        <div class="space-y-1 mt-2">
+          ${valesPeriodo.map(v=>`<div class="flex justify-between text-xs card-2 p-2"><span>${v.data||''} ${v.motivo?'· '+v.motivo:''}</span><span class="text-[var(--danger)]">${fmtBRL(v.valor)}</span></div>`).join('')}
+        </div>
+      </details>` : ''}
+      ${linhas.length>0 ? `
+      <details>
+        <summary class="text-xs text-[var(--txt-dim)] cursor-pointer">Ver detalhamento item a item (${linhas.length})</summary>
+        <div class="space-y-1 mt-2">
+          ${linhas.map(l=>`
+            <div class="flex justify-between text-xs card-2 p-2">
+              <span>${l.data} · ${l.descricao}</span>
+              <span>${fmtBRL(l.valor)} <span class="text-[var(--ok)]">(com. ${fmtBRL(l.comissao)})</span></span>
+            </div>`).join('')}
+        </div>
+      </details>` : ''}
     </div>`;
   }).join('');
+}
+
+// ---------------- VALES (adiantamentos de colaboradores) ----------------
+let vales = [];
+function initValesListener(){
+  db.collection('vales').orderBy('criadoEm','desc').limit(200).onSnapshot(s=>{
+    vales = s.docs.map(d=>({id:d.id, ...d.data()}));
+    renderComissoes();
+  });
+}
+function openRegistrarVale(barberId, barberName){
+  editingType = 'vale';
+  document.getElementById('genericModalTitle').textContent = `Registrar Vale — ${barberName}`;
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <input id="valeValor" type="number" step="0.01" class="input" placeholder="Valor do vale (R$)">
+      <input id="valeMotivo" class="input" placeholder="Motivo (opcional)">
+      <input id="valeData" type="date" class="input" value="${todayStr()}">
+      <button onclick="confirmarVale('${barberId}','${barberName.replace(/'/g,"&apos;")}')" class="btn-gold w-full py-3 rounded-xl mt-2">Registrar Vale</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarVale(barberId, barberName){
+  const valor = parseFloat(document.getElementById('valeValor').value)||0;
+  const motivo = document.getElementById('valeMotivo').value.trim();
+  const data = document.getElementById('valeData').value || todayStr();
+  if(valor<=0){ toast('Informe o valor do vale.', 'err'); return; }
+  await db.collection('vales').add({
+    barberId, barberName, valor, motivo, data,
+    criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    criadoPor: currentUser.email
+  });
+  closeGenericModal();
+  toast('Vale registrado!');
+}
+
+// ---------------- LUCRATIVIDADE (custo x venda por produto) ----------------
+let lucroPeriodo = 'dia';
+let lucroCustomStart = '', lucroCustomEnd = '';
+function setLucroPeriodo(p){
+  lucroPeriodo = p;
+  document.getElementById('lucroTabDia').classList.toggle('chip-active', p==='dia');
+  document.getElementById('lucroTabSemana').classList.toggle('chip-active', p==='semana');
+  document.getElementById('lucroTabMes').classList.toggle('chip-active', p==='mes');
+  document.getElementById('lucroTabPesquisar').classList.toggle('chip-active', p==='pesquisar');
+  document.getElementById('lucroCustomRange').classList.toggle('hide', p!=='pesquisar');
+  if(p!=='pesquisar') renderLucratividade();
+}
+function buscarLucroPorData(){
+  lucroCustomStart = document.getElementById('lucroDataInicio').value;
+  lucroCustomEnd = document.getElementById('lucroDataFim').value;
+  if(!lucroCustomStart){ toast('Escolha ao menos a data de início.', 'err'); return; }
+  renderLucratividade();
+}
+function getLucroRangeMs(){
+  if(lucroPeriodo==='pesquisar'){
+    const start = lucroCustomStart ? new Date(lucroCustomStart+'T00:00:00').getTime() : 0;
+    const end = lucroCustomEnd ? new Date(lucroCustomEnd+'T23:59:59').getTime() : Date.now();
+    return {startMs:start, endMs:end};
+  }
+  return {startMs: getPeriodStart(lucroPeriodo).getTime(), endMs: Date.now()};
+}
+function renderLucratividade(){
+  const box = document.getElementById('lucroList');
+  const resumoBox = document.getElementById('lucroResumoBox');
+  if(!box) return;
+  const {startMs, endMs} = getLucroRangeMs();
+  const pedidos = orders.filter(o=>{
+    if(o.status!=='entregue') return false;
+    const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
+    return t>=startMs && t<=endMs;
+  });
+  const porProduto = {};
+  pedidos.forEach(o=>{
+    (o.items||[]).forEach(it=>{
+      const key = it.itemId || ('livre:'+it.name);
+      if(!porProduto[key]) porProduto[key] = {name: it.name, itemId: it.itemId, qty:0, receita:0, custo:0};
+      const catalogRef = it.itemId ? catalogItems.find(c=>c.id===it.itemId) : null;
+      const custoUnit = catalogRef?.costPrice || 0;
+      porProduto[key].qty += it.qty||1;
+      porProduto[key].receita += (it.price||0)*(it.qty||1);
+      porProduto[key].custo += custoUnit*(it.qty||1);
+    });
+  });
+  const lista = Object.values(porProduto).map(p=>({
+    ...p, lucro: p.receita-p.custo,
+    categoria: p.itemId ? (catalogItems.find(c=>c.id===p.itemId)?.category) : null
+  })).sort((a,b)=>b.receita-a.receita);
+
+  const totalReceita = lista.reduce((s,p)=>s+p.receita,0);
+  const totalCusto = lista.reduce((s,p)=>s+p.custo,0);
+  const totalLucro = totalReceita - totalCusto;
+  resumoBox.innerHTML = `
+    <div class="grid grid-cols-3 gap-2 text-center">
+      <div><p class="text-xs text-[var(--txt-dim)]">Receita</p><p class="font-display text-xl text-[var(--gold)]">${fmtBRL(totalReceita)}</p></div>
+      <div><p class="text-xs text-[var(--txt-dim)]">Custo</p><p class="font-display text-xl text-[var(--danger)]">${fmtBRL(totalCusto)}</p></div>
+      <div><p class="text-xs text-[var(--txt-dim)]">Lucro</p><p class="font-display text-xl text-[var(--ok)]">${fmtBRL(totalLucro)}</p></div>
+    </div>`;
+
+  if(lista.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhuma venda de produto no período.</p>`; return; }
+  box.innerHTML = lista.map(p=>`
+    <div class="card p-3">
+      <div class="flex items-center justify-between mb-1">
+        <p class="font-semibold text-sm">${p.name}</p>
+        <span class="text-xs text-[var(--txt-dim)]">${p.categoria ? (CAT_LABELS[p.categoria]||capitalize(p.categoria)) : '—'}</span>
+      </div>
+      <div class="grid grid-cols-4 gap-1 text-xs text-center">
+        <div><p class="text-[var(--txt-dim)]">Qtd</p><p class="font-semibold">${p.qty}</p></div>
+        <div><p class="text-[var(--txt-dim)]">Custo</p><p class="font-semibold">${fmtBRL(p.custo)}</p></div>
+        <div><p class="text-[var(--txt-dim)]">Venda</p><p class="font-semibold">${fmtBRL(p.receita)}</p></div>
+        <div><p class="text-[var(--txt-dim)]">Lucro</p><p class="font-semibold text-[var(--ok)]">${fmtBRL(p.lucro)}</p></div>
+      </div>
+    </div>`).join('');
+}
+
+// ---------------- CONTAS A PAGAR ----------------
+let contasPagar = [];
+function initContasPagarListener(){
+  db.collection('contasPagar').orderBy('vencimento').onSnapshot(s=>{
+    contasPagar = s.docs.map(d=>({id:d.id, ...d.data()}));
+    renderContasPagar();
+    renderAlertaContasPagar();
+  });
+}
+function renderContasPagar(){
+  const box = document.getElementById('contasPagarList');
+  if(!box) return;
+  if(contasPagar.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhuma conta cadastrada.</p>`; return; }
+  const hojeMs = new Date(new Date().toDateString()).getTime();
+  box.innerHTML = contasPagar.map(c=>{
+    const vencMs = new Date(c.vencimento+'T00:00:00').getTime();
+    const diasRestantes = Math.round((vencMs-hojeMs)/86400000);
+    const vencida = !c.pago && diasRestantes<0;
+    const proxima = !c.pago && diasRestantes>=0 && diasRestantes<=2;
+    return `
+    <div class="card p-3 flex items-center justify-between ${c.pago?'opacity-50':''}">
+      <div>
+        <p class="font-semibold text-sm">${c.descricao} ${vencida?'<span class="text-[var(--danger)] text-xs">(VENCIDA)</span>':proxima?'<span class="text-[var(--warn)] text-xs">(vence em breve)</span>':''}</p>
+        <p class="text-xs text-[var(--txt-dim)]">Vencimento: ${fmtDateBR(c.vencimento)} · ${fmtBRL(c.valor)} ${c.pago?'· PAGA':''}</p>
+      </div>
+      <div class="flex gap-2">
+        ${!c.pago?`<button onclick="marcarContaPaga('${c.id}')" class="w-9 h-9 rounded-lg bg-[var(--ok)]/20 text-[var(--ok)] flex items-center justify-center"><i class="fa-solid fa-check"></i></button>`:''}
+        <button onclick="deleteDoc('contasPagar','${c.id}')" class="w-9 h-9 rounded-lg card-2 text-[var(--danger)] flex items-center justify-center"><i class="fa-solid fa-trash text-xs"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function openContaPagarForm(){
+  editingType = 'conta-pagar';
+  document.getElementById('genericModalTitle').textContent = 'Nova Conta a Pagar';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <input id="cpDescricao" class="input" placeholder="Descrição (ex: Aluguel, Fornecedor)">
+      <input id="cpValor" type="number" step="0.01" class="input" placeholder="Valor (R$)">
+      <input id="cpVencimento" type="date" class="input">
+      <button onclick="salvarContaPagar()" class="btn-gold w-full py-3 rounded-xl mt-2">Salvar</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function salvarContaPagar(){
+  const descricao = document.getElementById('cpDescricao').value.trim();
+  const valor = parseFloat(document.getElementById('cpValor').value)||0;
+  const vencimento = document.getElementById('cpVencimento').value;
+  if(!descricao || valor<=0 || !vencimento){ toast('Preencha todos os campos.', 'err'); return; }
+  await db.collection('contasPagar').add({
+    descricao, valor, vencimento, pago:false,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  closeGenericModal();
+  toast('Conta cadastrada!');
+}
+async function marcarContaPaga(id){
+  await db.collection('contasPagar').doc(id).update({pago:true, pagoEm: firebase.firestore.FieldValue.serverTimestamp()});
+  toast('Conta marcada como paga!');
+}
+function renderAlertaContasPagar(){
+  const box = document.getElementById('contasAlertBox');
+  if(!box) return;
+  const hojeMs = new Date(new Date().toDateString()).getTime();
+  const proximas = contasPagar.filter(c=>{
+    if(c.pago) return false;
+    const vencMs = new Date(c.vencimento+'T00:00:00').getTime();
+    const dias = Math.round((vencMs-hojeMs)/86400000);
+    return dias <= 2;
+  }).sort((a,b)=> a.vencimento < b.vencimento ? -1 : 1);
+  if(proximas.length===0){ box.innerHTML=''; return; }
+  box.innerHTML = `
+    <div class="card p-4 border border-[var(--danger)]">
+      <p class="font-semibold text-sm mb-2"><i class="fa-solid fa-triangle-exclamation mr-2 text-[var(--danger)]"></i>${proximas.length} conta(s) a pagar vencendo</p>
+      <div class="space-y-2">
+        ${proximas.map(c=>`
+          <div class="card-2 p-2 flex justify-between text-xs">
+            <span>${c.descricao} — vence ${fmtDateBR(c.vencimento)}</span><span class="font-semibold">${fmtBRL(c.valor)}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
 }
 
 // ---------------- FECHAMENTO DE MÊS (comissões) + HISTÓRICO ----------------
@@ -2181,7 +2555,7 @@ async function fecharMesComissao(){
 
 // ---------------- RESET TOTAL DO SISTEMA (uso interno — SUPER_ADMIN_EMAILS) ----------------
 function resetarSistemaPrompt(){
-  if(!confirm('ATENÇÃO: isso vai APAGAR PERMANENTEMENTE todos os agendamentos, pedidos, mesas, sessões de caixa, serviços, barbeiros e itens do catálogo. Essa ação não pode ser desfeita. Deseja continuar?')) return;
+  if(!confirm('ATENÇÃO: isso vai APAGAR PERMANENTEMENTE todos os agendamentos, pedidos, mesas, sessões de caixa, serviços, barbeiros, itens do catálogo, vales e contas a pagar. Essa ação não pode ser desfeita. Deseja continuar?')) return;
   const frase = prompt('Pra confirmar, digite exatamente: RESETAR');
   if(frase !== 'RESETAR'){ toast('Reset cancelado (texto não conferiu).', 'err'); return; }
   if(!confirmCancelPassword()){ toast('Senha incorreta. Reset cancelado.', 'err'); return; }
@@ -2189,7 +2563,7 @@ function resetarSistemaPrompt(){
 }
 async function resetarSistema(){
   toast('Resetando o sistema, aguarde...');
-  const colecoes = ['appointments','orders','mesas','caixaSessions','services','barbers','catalogItems'];
+  const colecoes = ['appointments','orders','mesas','caixaSessions','services','barbers','catalogItems','vales','contasPagar'];
   try{
     for(const col of colecoes){
       let snap = await db.collection(col).limit(450).get();
@@ -2280,11 +2654,24 @@ function fecharMesaPrompt(mesaId){
     toast('Senha incorreta. Fechamento não realizado.', 'err');
     return;
   }
-  fecharMesa(mesaId);
+  editingType = 'fechar-mesa'; editingId = mesaId;
+  document.getElementById('genericModalTitle').textContent = 'Fechar Mesa — Forma de pagamento';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <select id="mesaPagamento" class="input">
+        <option value="dinheiro">Dinheiro</option>
+        <option value="credito">Cartão de Crédito</option>
+        <option value="debito">Cartão de Débito</option>
+        <option value="outros">Outros (Pix, etc.)</option>
+      </select>
+      <button onclick="fecharMesa('${mesaId}')" class="btn-gold w-full py-3 rounded-xl mt-2">Confirmar Fechamento</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
 }
 async function fecharMesa(mesaId){
   const mesa = mesasAbertas.find(m=>m.id===mesaId);
   if(!mesa) return;
+  const paymentMethod = document.getElementById('mesaPagamento')?.value || 'dinheiro';
   const total = (mesa.itens||[]).reduce((s,it)=>s+(it.price*it.qty),0);
   try{
     if(total > 0){
@@ -2292,7 +2679,7 @@ async function fecharMesa(mesaId){
         clientId: null, clientName: `Mesa: ${mesa.nome}`,
         clientPhone: '',
         items: mesa.itens||[],
-        total, status:'entregue', source:'mesa',
+        total, paymentMethod, status:'entregue', source:'mesa',
         entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -2300,6 +2687,7 @@ async function fecharMesa(mesaId){
     await db.collection('mesas').doc(mesaId).update({
       status:'fechada', fechadaEm: firebase.firestore.FieldValue.serverTimestamp(), fechadaPor: currentUser.email
     });
+    closeGenericModal();
     toast('Mesa fechada e lançada na venda do dia!');
   }catch(e){ toast('Erro ao fechar mesa.', 'err'); }
 }
