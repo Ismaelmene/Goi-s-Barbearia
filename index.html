@@ -248,32 +248,17 @@
   </header>
 
   <!-- ---------- DASHBOARD ---------- -->
-  <section id="admin-dashboard" class="px-5 pt-5 fade-in">
-    <h2 class="font-display text-3xl mb-4">DASHBOARD</h2>
-    <button onclick="seedGoiasBarbearia()" id="seedBtn" class="card-2 w-full p-3 mb-4 text-sm text-left flex items-center justify-between">
-      <span><i class="fa-solid fa-download mr-2 text-[var(--gold)]"></i>Importar cardápio da Goiás Barbearia (1 clique)</span>
-      <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
-    </button>
+  <section id="admin-dashboard" class="px-5 pt-5 fade-in pb-10">
+    <h2 class="font-display text-3xl mb-4">CAIXA</h2>
 
     <!-- CAIXA -->
     <div id="caixaCard" class="card p-4 mb-5"></div>
 
     <div id="aguardandoConfirmBox" class="mb-5"></div>
 
-    <div class="grid grid-cols-2 gap-3 mb-5">
-      <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Agendamentos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiAgendHoje">0</p></div>
-      <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Pedidos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiPedHoje">0</p></div>
-      <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Faturamento hoje</p><p class="font-display text-2xl text-[var(--ok)]" id="kpiFatHoje">R$ 0,00</p></div>
-      <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Aguardando</p><p class="font-display text-3xl text-[var(--warn)]" id="kpiAguardando">0</p></div>
-    </div>
-    <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Agenda de hoje</h3>
-    <div id="dashTodayList" class="space-y-2 mb-5"></div>
-    <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Pedidos recentes</h3>
-    <div id="dashOrdersList" class="space-y-2 mb-5"></div>
-    <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Top 10 mais vendidos</h3>
-    <div id="topProductsList" class="space-y-2"></div>
+    <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Pedidos em aberto</h3>
+    <div id="pedidosAbertoList" class="space-y-2"></div>
   </section>
-
 
   <!-- ---------- AGENDA ---------- -->
   <section id="admin-agenda" class="hide px-5 pt-5 fade-in">
@@ -310,18 +295,45 @@
       <h2 class="font-display text-3xl">CATÁLOGO</h2>
       <button onclick="openCatalogForm()" class="btn-gold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-plus mr-1"></i>Novo</button>
     </div>
+    <button onclick="seedGoiasBarbearia()" id="seedBtn" class="card-2 w-full p-3 mb-4 text-sm text-left flex items-center justify-between">
+      <span><i class="fa-solid fa-download mr-2 text-[var(--gold)]"></i>Importar cardápio da Goiás Barbearia (1 clique)</span>
+      <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
+    </button>
     <div id="adminCatalogList" class="space-y-2"></div>
   </section>
 
-  <!-- ---------- COMISSÕES ---------- -->
-  <section id="admin-comissoes" class="hide px-5 pt-5 fade-in pb-10">
-    <h2 class="font-display text-3xl mb-4">COMISSÕES</h2>
+  <!-- ---------- RELATÓRIOS (resumo + comissões) ---------- -->
+  <section id="admin-relatorios" class="hide px-5 pt-5 fade-in pb-10">
+    <h2 class="font-display text-3xl mb-4">RELATÓRIOS</h2>
     <div class="flex gap-2 mb-4">
-      <button id="comTabDia" onclick="setComissaoPeriodo('dia')" class="chip chip-active">Hoje</button>
-      <button id="comTabMes" onclick="setComissaoPeriodo('mes')" class="chip">Este mês</button>
+      <button id="relTabResumo" onclick="setRelatorioTab('resumo')" class="chip chip-active">Resumo</button>
+      <button id="relTabComissoes" onclick="setRelatorioTab('comissoes')" class="chip">Comissões</button>
     </div>
-    <div id="comissoesList" class="space-y-3"></div>
+
+    <div id="relatorioResumo">
+      <div class="grid grid-cols-2 gap-3 mb-5">
+        <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Agendamentos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiAgendHoje">0</p></div>
+        <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Pedidos hoje</p><p class="font-display text-3xl text-[var(--gold)]" id="kpiPedHoje">0</p></div>
+        <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Faturamento hoje</p><p class="font-display text-2xl text-[var(--ok)]" id="kpiFatHoje">R$ 0,00</p></div>
+        <div class="card p-4"><p class="text-xs text-[var(--txt-dim)]">Aguardando</p><p class="font-display text-3xl text-[var(--warn)]" id="kpiAguardando">0</p></div>
+      </div>
+      <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Agenda de hoje</h3>
+      <div id="dashTodayList" class="space-y-2 mb-5"></div>
+      <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Pedidos recentes</h3>
+      <div id="dashOrdersList" class="space-y-2 mb-5"></div>
+      <h3 class="text-sm text-[var(--txt-dim)] uppercase tracking-wide mb-2">Top 10 mais vendidos</h3>
+      <div id="topProductsList" class="space-y-2"></div>
+    </div>
+
+    <div id="relatorioComissoes" class="hide">
+      <div class="flex gap-2 mb-4">
+        <button id="comTabDia" onclick="setComissaoPeriodo('dia')" class="chip chip-active">Hoje</button>
+        <button id="comTabMes" onclick="setComissaoPeriodo('mes')" class="chip">Este mês</button>
+      </div>
+      <div id="comissoesList" class="space-y-3"></div>
+    </div>
   </section>
+
 
   <!-- ---------- MESAS (comandas) ---------- -->
   <section id="admin-mesas" class="hide px-5 pt-5 fade-in pb-10">
@@ -334,13 +346,13 @@
 
   <nav class="fixed bottom-0 left-0 right-0 z-30 bg-[var(--panel)] border-t border-[var(--line)]">
     <div class="max-w-md mx-auto grid grid-cols-7 text-center">
-      <button onclick="goToAdmin('dashboard')" data-anav="dashboard" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-chart-line"></i>Dash</button>
+      <button onclick="goToAdmin('dashboard')" data-anav="dashboard" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-cash-register"></i>Caixa</button>
       <button onclick="goToAdmin('agenda')" data-anav="agenda" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-calendar-days"></i>Agenda</button>
       <button onclick="goToAdmin('mesas')" data-anav="mesas" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-chair"></i>Mesas</button>
       <button onclick="goToAdmin('servicos')" data-anav="servicos" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-scissors"></i>Serviços</button>
       <button onclick="goToAdmin('equipe')" data-anav="equipe" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-user-tie"></i>Equipe</button>
       <button onclick="goToAdmin('catalogo')" data-anav="catalogo" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-bag-shopping"></i>Catálogo</button>
-      <button onclick="goToAdmin('comissoes')" data-anav="comissoes" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-sack-dollar"></i>Comissões</button>
+      <button onclick="goToAdmin('relatorios')" data-anav="relatorios" class="py-3 flex flex-col items-center gap-1 text-[var(--txt-dim)] text-[10px]"><i class="fa-solid fa-chart-pie"></i>Relatórios</button>
     </div>
   </nav>
 </div>
@@ -1017,19 +1029,27 @@ function renderMeusPedidos(){
    ============================  ADMIN  ==================================
    ===================================================================== */
 function goToAdmin(view){
-  ['dashboard','agenda','servicos','equipe','catalogo','comissoes','mesas'].forEach(v=>{
+  ['dashboard','agenda','servicos','equipe','catalogo','relatorios','mesas'].forEach(v=>{
     document.getElementById('admin-'+v).classList.toggle('hide', v!==view);
   });
   document.querySelectorAll('[data-anav]').forEach(b=>{
     b.classList.toggle('tab-active', b.dataset.anav===view);
   });
-  if(view==='comissoes') renderComissoes();
+  if(view==='relatorios') renderDashboard();
+  if(view==='dashboard') renderPedidosEmAberto();
   if(view==='agenda'){
     const dateInput = document.getElementById('agendaDateFilter');
     if(dateInput && !dateInput.value) dateInput.value = todayStr();
     renderAdminAgenda();
   }
   if(view==='mesas') renderMesas();
+}
+function setRelatorioTab(tab){
+  document.getElementById('relTabResumo').classList.toggle('chip-active', tab==='resumo');
+  document.getElementById('relTabComissoes').classList.toggle('chip-active', tab==='comissoes');
+  document.getElementById('relatorioResumo').classList.toggle('hide', tab!=='resumo');
+  document.getElementById('relatorioComissoes').classList.toggle('hide', tab!=='comissoes');
+  if(tab==='comissoes') renderComissoes();
 }
 
 // ---------------- DASHBOARD ----------------
@@ -1060,6 +1080,16 @@ function renderDashboard(){
   renderCaixaCard();
   renderTopProducts();
   renderAguardandoConfirmacao();
+  renderPedidosEmAberto();
+}
+
+// ---------------- PEDIDOS EM ABERTO (aparecem no Caixa até serem entregues/cancelados) ----------------
+function renderPedidosEmAberto(){
+  const box = document.getElementById('pedidosAbertoList');
+  if(!box) return;
+  const abertos = orders.filter(o=> ['aguardando','preparo','pronto'].includes(o.status))
+    .sort((a,b)=> (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+  box.innerHTML = abertos.length ? abertos.map(o=>adminOrderRow(o)).join('') : `<p class="text-sm text-[var(--txt-dim)]">Nenhum pedido em aberto no momento.</p>`;
 }
 
 // ---------------- AGUARDANDO CONFIRMAÇÃO (independente da data filtrada na Agenda) ----------------
