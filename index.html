@@ -374,6 +374,14 @@
         <input id="lucroDataFim" type="date" class="input">
         <button onclick="buscarLucroPorData()" class="btn-gold col-span-2 py-2 rounded-xl text-sm">Buscar</button>
       </div>
+      <div class="grid grid-cols-2 gap-2 mb-4">
+        <select id="lucroFiltroProduto" class="input" onchange="renderLucratividade()">
+          <option value="">Todos os produtos</option>
+        </select>
+        <select id="lucroFiltroCategoria" class="input" onchange="renderLucratividade()">
+          <option value="">Todas as categorias</option>
+        </select>
+      </div>
       <div id="lucroResumoBox" class="card p-4 mb-4"></div>
       <div id="lucroList" class="space-y-2"></div>
     </div>
@@ -1317,10 +1325,11 @@ function renderCaixaCard(){
         <p class="text-xs text-[var(--txt-dim)]">Abertura: ${fmtBRL(caixaAtual.valorAbertura)} · Vendas no caixa: ${fmtBRL(vendasCaixa)}</p>
       </div>
     </div>
-    <div class="flex gap-2">
-      <button onclick="openLancarVenda()" class="btn-gold flex-1 py-2.5 rounded-xl text-sm"><i class="fa-solid fa-plus mr-1"></i>Lançar Venda</button>
-      <button onclick="fecharCaixaPrompt()" class="card-2 flex-1 py-2.5 rounded-xl text-sm">Fechar Caixa</button>
-    </div>`;
+    <div class="grid grid-cols-2 gap-2 mb-2">
+      <button onclick="openLancarVenda()" class="btn-gold py-2.5 rounded-xl text-sm"><i class="fa-solid fa-bag-shopping mr-1"></i>Lançar Venda</button>
+      <button onclick="openLancarServico()" class="btn-gold py-2.5 rounded-xl text-sm"><i class="fa-solid fa-scissors mr-1"></i>Lançar Serviço</button>
+    </div>
+    <button onclick="fecharCaixaPrompt()" class="card-2 w-full py-2.5 rounded-xl text-sm">Fechar Caixa</button>`;
 }
 function calcularVendasCaixa(){
   if(!caixaAtual) return 0;
@@ -1337,7 +1346,7 @@ function calcularVendasCaixa(){
   }).reduce((s,a)=>s+(a.price||0),0);
   return vendasOrders + vendasAppts;
 }
-const PAYMENT_LABELS = {dinheiro:'Dinheiro', credito:'Cartão Crédito', debito:'Cartão Débito', outros:'Outros (Pix, etc.)'};
+const PAYMENT_LABELS = {dinheiro:'Dinheiro', debito:'Cartão Débito', credito:'Cartão Crédito', pix:'Pix', outros:'Outros'};
 function calcularVendasPorPagamento(){
   if(!caixaAtual) return {};
   const aberturaMs = caixaAtual.abertoEm?.toDate ? caixaAtual.abertoEm.toDate().getTime() : 0;
@@ -1349,6 +1358,14 @@ function calcularVendasPorPagamento(){
   }).forEach(o=>{
     const metodo = o.paymentMethod || 'dinheiro';
     porPagamento[metodo] = (porPagamento[metodo]||0) + (o.total||0);
+  });
+  appointments.filter(a=>{
+    if(a.status!=='concluido' || !a.paymentMethod) return false;
+    const t = a.concluidoEm?.toDate ? a.concluidoEm.toDate().getTime() : (a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0);
+    return t >= aberturaMs;
+  }).forEach(a=>{
+    const metodo = a.paymentMethod || 'dinheiro';
+    porPagamento[metodo] = (porPagamento[metodo]||0) + (a.price||0);
   });
   return porPagamento;
 }
@@ -1387,7 +1404,7 @@ function fecharCaixaPrompt(){
         <div class="flex justify-between font-bold pt-1 border-t border-[var(--line)]"><span>Total esperado em caixa</span><span>${fmtBRL(totalEsperado)}</span></div>
       </div>
       <div class="card-2 p-3 text-sm space-y-1">
-        <p class="text-xs text-[var(--txt-dim)] mb-1">Vendas de produtos por forma de pagamento</p>
+        <p class="text-xs text-[var(--txt-dim)] mb-1">Vendas por forma de pagamento</p>
         ${Object.keys(porPagamento).length===0 ? '<p class="text-xs text-[var(--txt-dim)]">Nenhuma venda de produto registrada.</p>' :
           Object.entries(porPagamento).map(([m,v])=>`<div class="flex justify-between"><span>${PAYMENT_LABELS[m]||m}</span><span>${fmtBRL(v)}</span></div>`).join('')}
       </div>
@@ -1450,9 +1467,10 @@ function vendaFormHtml(prefix){
       <label class="text-xs text-[var(--txt-dim)] block mb-1">Forma de pagamento</label>
       <select id="${prefix}Pagamento" class="input">
         <option value="dinheiro">Dinheiro</option>
-        <option value="credito">Cartão de Crédito</option>
         <option value="debito">Cartão de Débito</option>
-        <option value="outros">Outros (Pix, etc.)</option>
+        <option value="credito">Cartão de Crédito</option>
+        <option value="pix">Pix</option>
+        <option value="outros">Outros</option>
       </select>
     </div>
     <div class="pt-3 mt-3 border-t border-[var(--line)]">
@@ -1579,6 +1597,69 @@ function lerVendaForm(prefix){
     else if(valorDigitado > 0){ comissaoValor = valorDigitado; comissaoPct = null; }
   }
   return {itemName, precoUnit: finalUnitPrice, precoOriginal: precoUnit, qtd, desconto, total, paymentMethod, catalogRef, barberRef, comissaoPct, comissaoValor};
+}
+
+// ---------------- LANÇAR SERVIÇO NO CAIXA (sem precisar de agendamento) ----------------
+function openLancarServico(){
+  if(barbers.length===0){ toast('Cadastre pelo menos 1 colaborador em Equipe antes de lançar um serviço.', 'err'); return; }
+  editingType = 'servico-manual';
+  const opcoesServico = services.map(s=>`<option value="${s.name}">`).join('');
+  const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  document.getElementById('genericModalTitle').textContent = 'Lançar Serviço';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <input id="svNome" class="input" list="servicoNomesList" placeholder="Nome do serviço (ex: Corte Masculino)">
+      <datalist id="servicoNomesList">${opcoesServico}</datalist>
+      <input id="svValor" type="number" step="0.01" class="input" placeholder="Valor cobrado (R$)">
+      <div>
+        <label class="text-xs text-[var(--txt-dim)] block mb-1">Colaborador que realizou</label>
+        <select id="svBarbeiro" class="input">
+          <option value="" disabled selected>Selecione</option>
+          ${opcoesBarbeiro}
+        </select>
+      </div>
+      <input id="svComissaoPct" type="number" step="0.1" class="input" placeholder="Comissão (%) — deixe vazio pra usar a padrão dele">
+      <div>
+        <label class="text-xs text-[var(--txt-dim)] block mb-1">Forma de pagamento</label>
+        <select id="svPagamento" class="input">
+          <option value="dinheiro">Dinheiro</option>
+          <option value="debito">Cartão de Débito</option>
+          <option value="credito">Cartão de Crédito</option>
+          <option value="pix">Pix</option>
+          <option value="outros">Outros</option>
+        </select>
+      </div>
+      <button onclick="confirmarLancarServico()" class="btn-gold w-full py-3 rounded-xl mt-2">Lançar Serviço</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarLancarServico(){
+  const nome = document.getElementById('svNome').value.trim();
+  const valor = parseFloat(document.getElementById('svValor').value)||0;
+  const barberId = document.getElementById('svBarbeiro').value;
+  const barber = barbers.find(b=>b.id===barberId);
+  const pctDigitado = document.getElementById('svComissaoPct').value;
+  const paymentMethod = document.getElementById('svPagamento').value;
+  if(!nome){ toast('Informe o nome do serviço.', 'err'); return; }
+  if(valor<=0){ toast('Informe o valor cobrado.', 'err'); return; }
+  if(!barber){ toast('Selecione o colaborador.', 'err'); return; }
+  const now = new Date();
+  const hora = now.toTimeString().slice(0,5);
+  try{
+    await db.collection('appointments').add({
+      clientId: null, clientName: 'Cliente balcão', clientPhone: '',
+      barberId: barber.id, barberName: barber.name,
+      serviceId: null, serviceName: nome,
+      price: valor, durationMin: 0,
+      date: todayStr(), time: hora,
+      status: 'concluido', concluidoEm: firebase.firestore.FieldValue.serverTimestamp(),
+      commissionPctOverride: pctDigitado!=='' ? parseFloat(pctDigitado) : null,
+      paymentMethod, source: 'balcao-servico',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    closeGenericModal();
+    toast('Serviço lançado! Comissão já contabilizada.');
+  }catch(e){ toast('Erro ao lançar serviço.', 'err'); }
 }
 
 function openLancarVenda(){
@@ -2022,13 +2103,14 @@ function openCatalogForm(i){
       <div class="grid grid-cols-2 gap-2">
         <div>
           <label class="text-xs text-[var(--txt-dim)] block mb-1">Preço de compra (R$)</label>
-          <input id="fCostPrice" type="number" step="0.01" class="input" placeholder="Quanto você paga" value="${i?.costPrice??''}">
+          <input id="fCostPrice" type="number" step="0.01" class="input" placeholder="Quanto você paga" value="${i?.costPrice??''}" oninput="atualizarMargemProduto()">
         </div>
         <div>
           <label class="text-xs text-[var(--txt-dim)] block mb-1">Preço de venda (R$)</label>
-          <input id="fPrice" type="number" step="0.01" class="input" placeholder="Quanto o cliente paga" value="${i?.price||''}">
+          <input id="fPrice" type="number" step="0.01" class="input" placeholder="Quanto o cliente paga" value="${i?.price||''}" oninput="atualizarMargemProduto()">
         </div>
       </div>
+      <div id="margemProdutoBox" class="card-2 p-2 flex justify-between text-sm"></div>
       <div class="grid grid-cols-2 gap-2">
         <div>
           <label class="text-xs text-[var(--txt-dim)] block mb-1">Estoque atual</label>
@@ -2055,6 +2137,19 @@ function openCatalogForm(i){
       <button onclick="saveCatalogItem()" class="btn-gold w-full py-3 rounded-xl mt-2">Salvar</button>
     </div>`;
   document.getElementById('genericModal').classList.remove('hide');
+  atualizarMargemProduto();
+}
+function atualizarMargemProduto(){
+  const box = document.getElementById('margemProdutoBox');
+  if(!box) return;
+  const custo = parseFloat(document.getElementById('fCostPrice').value)||0;
+  const venda = parseFloat(document.getElementById('fPrice').value)||0;
+  const lucro = venda - custo;
+  const margemPct = venda>0 ? (lucro/venda)*100 : 0;
+  const cor = lucro>=0 ? 'var(--ok)' : 'var(--danger)';
+  box.innerHTML = `
+    <span class="text-[var(--txt-dim)]">Margem: ${margemPct.toFixed(1)}%</span>
+    <span style="color:${cor}" class="font-semibold">Lucro: ${fmtBRL(lucro)}</span>`;
 }
 async function saveCatalogItem(){
   const data = {
@@ -2198,12 +2293,16 @@ function calcularComissaoPorBarbeiro(startMs, endMs){
       return t >= startMs && t <= endMs;
     });
     const faturamentoServicos = apptsPeriodo.reduce((s,a)=>s+(a.price||0),0);
-    const comissaoServicos = faturamentoServicos * (commissionPct/100);
+    const comissaoServicos = apptsPeriodo.reduce((s,a)=>{
+      const pct = (a.commissionPctOverride!=null && a.commissionPctOverride>=0) ? a.commissionPctOverride : commissionPct;
+      return s + (a.price||0)*(pct/100);
+    }, 0);
 
     let faturamentoIndicacoes = 0, comissaoIndicacoes = 0, qtdIndicacoes = 0;
-    const linhas = apptsPeriodo.map(a=>({
-      tipo:'servico', descricao: a.serviceName, data: a.date, valor: a.price||0, comissao: (a.price||0)*(commissionPct/100)
-    }));
+    const linhas = apptsPeriodo.map(a=>{
+      const pct = (a.commissionPctOverride!=null && a.commissionPctOverride>=0) ? a.commissionPctOverride : commissionPct;
+      return {tipo:'servico', descricao: a.serviceName, data: a.date, valor: a.price||0, comissao: (a.price||0)*(pct/100)};
+    });
     pedidosPeriodo.forEach(({order,t})=>{
       (order.items||[]).forEach(it=>{
         if(it.barberId===b.id){
@@ -2374,6 +2473,19 @@ function renderLucratividade(){
   const box = document.getElementById('lucroList');
   const resumoBox = document.getElementById('lucroResumoBox');
   if(!box) return;
+
+  // Popula os filtros de produto/categoria mantendo a seleção atual
+  const filtroProdutoEl = document.getElementById('lucroFiltroProduto');
+  const filtroCategoriaEl = document.getElementById('lucroFiltroCategoria');
+  const produtoAtual = filtroProdutoEl.value;
+  const categoriaAtual = filtroCategoriaEl.value;
+  const nomesUnicos = [...new Set(catalogItems.map(i=>i.name))].sort();
+  const categoriasUnicas = [...new Set(catalogItems.map(i=>i.category))].sort();
+  filtroProdutoEl.innerHTML = '<option value="">Todos os produtos</option>' + nomesUnicos.map(n=>`<option value="${n}" ${produtoAtual===n?'selected':''}>${n}</option>`).join('');
+  filtroCategoriaEl.innerHTML = '<option value="">Todas as categorias</option>' + categoriasUnicas.map(c=>`<option value="${c}" ${categoriaAtual===c?'selected':''}>${CAT_LABELS[c]||capitalize(c)}</option>`).join('');
+  const filtroProduto = filtroProdutoEl.value;
+  const filtroCategoria = filtroCategoriaEl.value;
+
   const {startMs, endMs} = getLucroRangeMs();
   const pedidos = orders.filter(o=>{
     if(o.status!=='entregue') return false;
@@ -2383,19 +2495,19 @@ function renderLucratividade(){
   const porProduto = {};
   pedidos.forEach(o=>{
     (o.items||[]).forEach(it=>{
-      const key = it.itemId || ('livre:'+it.name);
-      if(!porProduto[key]) porProduto[key] = {name: it.name, itemId: it.itemId, qty:0, receita:0, custo:0};
       const catalogRef = it.itemId ? catalogItems.find(c=>c.id===it.itemId) : null;
+      const categoria = catalogRef?.category || null;
+      if(filtroProduto && it.name !== filtroProduto) return;
+      if(filtroCategoria && categoria !== filtroCategoria) return;
+      const key = it.itemId || ('livre:'+it.name);
+      if(!porProduto[key]) porProduto[key] = {name: it.name, itemId: it.itemId, categoria, qty:0, receita:0, custo:0};
       const custoUnit = catalogRef?.costPrice || 0;
       porProduto[key].qty += it.qty||1;
       porProduto[key].receita += (it.price||0)*(it.qty||1);
       porProduto[key].custo += custoUnit*(it.qty||1);
     });
   });
-  const lista = Object.values(porProduto).map(p=>({
-    ...p, lucro: p.receita-p.custo,
-    categoria: p.itemId ? (catalogItems.find(c=>c.id===p.itemId)?.category) : null
-  })).sort((a,b)=>b.receita-a.receita);
+  const lista = Object.values(porProduto).map(p=>({...p, lucro: p.receita-p.custo})).sort((a,b)=>b.receita-a.receita);
 
   const totalReceita = lista.reduce((s,p)=>s+p.receita,0);
   const totalCusto = lista.reduce((s,p)=>s+p.custo,0);
@@ -2407,7 +2519,7 @@ function renderLucratividade(){
       <div><p class="text-xs text-[var(--txt-dim)]">Lucro</p><p class="font-display text-xl text-[var(--ok)]">${fmtBRL(totalLucro)}</p></div>
     </div>`;
 
-  if(lista.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhuma venda de produto no período.</p>`; return; }
+  if(lista.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhuma venda encontrada para esse filtro/período.</p>`; return; }
   box.innerHTML = lista.map(p=>`
     <div class="card p-3">
       <div class="flex items-center justify-between mb-1">
@@ -2650,19 +2762,16 @@ async function confirmarAdicionarItemMesa(){
   }catch(e){ toast('Erro ao adicionar item.', 'err'); }
 }
 function fecharMesaPrompt(mesaId){
-  if(!confirmCancelPassword()){
-    toast('Senha incorreta. Fechamento não realizado.', 'err');
-    return;
-  }
   editingType = 'fechar-mesa'; editingId = mesaId;
   document.getElementById('genericModalTitle').textContent = 'Fechar Mesa — Forma de pagamento';
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <select id="mesaPagamento" class="input">
         <option value="dinheiro">Dinheiro</option>
-        <option value="credito">Cartão de Crédito</option>
         <option value="debito">Cartão de Débito</option>
-        <option value="outros">Outros (Pix, etc.)</option>
+        <option value="credito">Cartão de Crédito</option>
+        <option value="pix">Pix</option>
+        <option value="outros">Outros</option>
       </select>
       <button onclick="fecharMesa('${mesaId}')" class="btn-gold w-full py-3 rounded-xl mt-2">Confirmar Fechamento</button>
     </div>`;
