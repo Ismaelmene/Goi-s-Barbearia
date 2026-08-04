@@ -11,6 +11,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
+<!-- Leitor de planilhas (usado na importação em massa de produtos) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
 <!-- Firebase (compat, mesmo padrão dos apps anteriores: Vesh / AgroTec / TIP Certo) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -305,10 +308,15 @@
       <h2 class="font-display text-3xl">CATÁLOGO</h2>
       <button onclick="openCatalogForm()" class="btn-gold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-plus mr-1"></i>Novo</button>
     </div>
-    <button onclick="seedGoiasBarbearia()" id="seedBtn" class="card-2 w-full p-3 mb-4 text-sm text-left flex items-center justify-between">
+    <button onclick="seedGoiasBarbearia()" id="seedBtn" class="card-2 w-full p-3 mb-3 text-sm text-left flex items-center justify-between">
       <span><i class="fa-solid fa-download mr-2 text-[var(--gold)]"></i>Importar cardápio da Goiás Barbearia (1 clique)</span>
       <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
     </button>
+    <button onclick="document.getElementById('nextImportFile').click()" class="card-2 w-full p-3 mb-4 text-sm text-left flex items-center justify-between">
+      <span><i class="fa-solid fa-file-excel mr-2 text-[var(--ok)]"></i>Importar planilha do Next (.xls/.xlsx)</span>
+      <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
+    </button>
+    <input type="file" id="nextImportFile" accept=".xls,.xlsx,.csv" class="hide" onchange="processarPlanilhaNext(this.files[0])">
     <div id="adminCatalogList" class="space-y-2"></div>
   </section>
 
@@ -2398,6 +2406,137 @@ async function seedGoiasBarbearia(){
     toast('Erro ao importar. Confira o firebaseConfig.', 'err');
   } finally {
     btn.disabled = false; btn.style.opacity = '1';
+  }
+}
+
+// ---------------- IMPORTAÇÃO EM MASSA — PLANILHA DO NEXT (.xls/.xlsx) ----------------
+// Mapeamento fixo pras colunas exatas que o Next exporta. Se o Next mudar o nome
+// de alguma coluna no futuro, ajuste os nomes abaixo (entre aspas) de acordo.
+const NEXT_COL = {
+  nome: 'Nome', preco: 'Preço', estoque: 'Estoque Atual', estoqueMin: 'Estoque Min.',
+  categoria: 'Categoria', comissao: 'Comissão', status: 'Status', ean: 'EAN / GTIN'
+};
+// Categorias do Next que NÃO são produtos de catálogo (são serviços/entregas/etc)
+const NEXT_CATEGORIAS_EXCLUIDAS = ['barbearia goias', 'entregas'];
+// Nomes que indicam lançamento administrativo do Next (vale, ajuste, gorjeta...), não produto de verdade
+const NEXT_NOME_JUNK_REGEX = /(ajuste|despesa|gorjeta|^vale\s*\(|^comissao\s|taxa entrega|entrega feita)/i;
+
+let nextImportPreview = []; // itens aprovados, prontos pra gravar
+let nextImportIgnorados = []; // itens ignorados, com motivo
+
+function parseNextComissaoPct(raw){
+  if(raw===null || raw===undefined || raw==='') return 0;
+  const s = String(raw).replace('%','').replace(',','.').trim();
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function classificarLinhaNext(row){
+  const nome = (row[NEXT_COL.nome]||'').toString().trim();
+  const categoria = (row[NEXT_COL.categoria]||'').toString().trim();
+  const status = (row[NEXT_COL.status]||'').toString().trim();
+  if(!nome) return {ok:false, motivo:'linha sem nome'};
+  if(!categoria) return {ok:false, motivo:'sem categoria no Next'};
+  if(NEXT_CATEGORIAS_EXCLUIDAS.includes(categoria.toLowerCase())) return {ok:false, motivo:`categoria "${categoria}" é serviço/entrega, não produto de catálogo`};
+  if(NEXT_NOME_JUNK_REGEX.test(nome)) return {ok:false, motivo:'parece lançamento administrativo do Next (vale, ajuste, gorjeta...), não um produto'};
+  if(status && status.toLowerCase()!=='ativo') return {ok:false, motivo:'produto inativo no Next'};
+  return {ok:true};
+}
+function processarPlanilhaNext(file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try{
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type:'array', cellDates:false});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {defval:null});
+
+      nextImportPreview = [];
+      nextImportIgnorados = [];
+      rows.forEach(row=>{
+        const classificacao = classificarLinhaNext(row);
+        if(!classificacao.ok){
+          const nome = (row[NEXT_COL.nome]||'(sem nome)').toString().trim();
+          if(nome && nome!=='(sem nome)') nextImportIgnorados.push({nome, motivo: classificacao.motivo});
+          return;
+        }
+        const nome = row[NEXT_COL.nome].toString().trim();
+        const estoqueRaw = parseInt(row[NEXT_COL.estoque])||0;
+        nextImportPreview.push({
+          name: nome,
+          nameLower: nome.toLowerCase(),
+          category: row[NEXT_COL.categoria].toString().trim().toLowerCase(),
+          price: parseFloat(row[NEXT_COL.preco])||0,
+          costPrice: 0,
+          stock: Math.max(0, estoqueRaw),
+          estoqueEraNegativo: estoqueRaw < 0,
+          stockMin: Math.max(0, parseInt(row[NEXT_COL.estoqueMin])||0),
+          commissionPct: parseNextComissaoPct(row[NEXT_COL.comissao]),
+          barcode: row[NEXT_COL.ean] ? String(row[NEXT_COL.ean]).trim() : null,
+          imageUrl: '', active: true
+        });
+      });
+      mostrarPreviewImportacaoNext();
+    }catch(err){
+      toast('Erro ao ler o arquivo. Confira se é o formato certo.', 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  document.getElementById('nextImportFile').value = '';
+}
+function mostrarPreviewImportacaoNext(){
+  const qtdNegativo = nextImportPreview.filter(p=>p.estoqueEraNegativo).length;
+  editingType = 'import-next';
+  document.getElementById('genericModalTitle').textContent = 'Conferir Importação';
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <div class="card-2 p-3 text-sm space-y-1">
+        <div class="flex justify-between"><span class="text-[var(--txt-dim)]">Produtos prontos pra importar</span><span class="font-semibold text-[var(--ok)]">${nextImportPreview.length}</span></div>
+        <div class="flex justify-between"><span class="text-[var(--txt-dim)]">Linhas ignoradas</span><span class="font-semibold text-[var(--warn)]">${nextImportIgnorados.length}</span></div>
+        ${qtdNegativo>0?`<div class="flex justify-between"><span class="text-[var(--txt-dim)]">Estoque negativo (zerado)</span><span class="font-semibold text-[var(--danger)]">${qtdNegativo}</span></div>`:''}
+      </div>
+      <p class="text-xs text-[var(--txt-dim)]">O preço de compra não vem do Next — todos entram com R$ 0,00 e você ajusta depois em cada produto pra usar a Lucratividade certinha.</p>
+      <details>
+        <summary class="text-xs text-[var(--gold)] cursor-pointer">Ver os ${nextImportPreview.length} produtos que serão importados</summary>
+        <div class="space-y-1 mt-2 max-h-40 overflow-y-auto">
+          ${nextImportPreview.map(p=>`<div class="text-xs card-2 p-1.5 flex justify-between"><span>${p.name}</span><span>${fmtBRL(p.price)}</span></div>`).join('')}
+        </div>
+      </details>
+      ${nextImportIgnorados.length>0?`
+      <details>
+        <summary class="text-xs text-[var(--warn)] cursor-pointer">Ver as ${nextImportIgnorados.length} linhas ignoradas e o motivo</summary>
+        <div class="space-y-1 mt-2 max-h-40 overflow-y-auto">
+          ${nextImportIgnorados.map(p=>`<div class="text-xs card-2 p-1.5"><span class="font-semibold">${p.nome}</span><br><span class="text-[var(--txt-dim)]">${p.motivo}</span></div>`).join('')}
+        </div>
+      </details>`:''}
+      <button onclick="confirmarImportacaoNext()" class="btn-gold w-full py-3 rounded-xl mt-2">Confirmar e Importar ${nextImportPreview.length} Produtos</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function confirmarImportacaoNext(){
+  if(nextImportPreview.length===0){ toast('Nenhum produto pra importar.', 'err'); return; }
+  toast('Importando, aguarde...');
+  try{
+    // Firestore só aceita até 500 operações por batch — divide em blocos de 450
+    for(let i=0; i<nextImportPreview.length; i+=450){
+      const bloco = nextImportPreview.slice(i, i+450);
+      const batch = db.batch();
+      bloco.forEach(p=>{
+        const {estoqueEraNegativo, ...dadosProduto} = p;
+        const ref = db.collection('catalogItems').doc();
+        batch.set(ref, {...dadosProduto, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+      });
+      await batch.commit();
+    }
+    const categoriasUnicas = [...new Set(nextImportPreview.map(p=>p.category))];
+    await db.collection('settings').doc('catalogCategories').set({
+      list: firebase.firestore.FieldValue.arrayUnion(...categoriasUnicas)
+    }, {merge:true});
+    closeGenericModal();
+    toast(`${nextImportPreview.length} produtos importados com sucesso!`);
+    nextImportPreview = []; nextImportIgnorados = [];
+  }catch(e){
+    toast('Erro ao gravar no Firestore. Confira as regras.', 'err');
   }
 }
 
