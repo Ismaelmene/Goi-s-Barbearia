@@ -374,6 +374,10 @@
         <input id="lucroDataFim" type="date" class="input">
         <button onclick="buscarLucroPorData()" class="btn-gold col-span-2 py-2 rounded-xl text-sm">Buscar</button>
       </div>
+      <div class="relative mb-3">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[var(--txt-dim)] text-sm"></i>
+        <input id="lucroBuscaProduto" class="input pl-9" placeholder="Buscar produto pelo nome..." oninput="renderLucratividade()">
+      </div>
       <div class="grid grid-cols-2 gap-2 mb-4">
         <select id="lucroFiltroProduto" class="input" onchange="renderLucratividade()">
           <option value="">Todos os produtos</option>
@@ -1604,21 +1608,21 @@ function openLancarServico(){
   if(barbers.length===0){ toast('Cadastre pelo menos 1 colaborador em Equipe antes de lançar um serviço.', 'err'); return; }
   editingType = 'servico-manual';
   const opcoesServico = services.map(s=>`<option value="${s.name}">`).join('');
-  const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}" data-pct="${b.commissionPct||0}">${b.name}</option>`).join('');
   document.getElementById('genericModalTitle').textContent = 'Lançar Serviço';
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
       <input id="svNome" class="input" list="servicoNomesList" placeholder="Nome do serviço (ex: Corte Masculino)">
       <datalist id="servicoNomesList">${opcoesServico}</datalist>
-      <input id="svValor" type="number" step="0.01" class="input" placeholder="Valor cobrado (R$)">
+      <input id="svValor" type="number" step="0.01" class="input" placeholder="Valor cobrado (R$)" oninput="atualizarComissaoServicoPreview()">
       <div>
         <label class="text-xs text-[var(--txt-dim)] block mb-1">Colaborador que realizou</label>
-        <select id="svBarbeiro" class="input">
+        <select id="svBarbeiro" class="input" onchange="atualizarComissaoServicoPreview()">
           <option value="" disabled selected>Selecione</option>
           ${opcoesBarbeiro}
         </select>
       </div>
-      <input id="svComissaoPct" type="number" step="0.1" class="input" placeholder="Comissão (%) — deixe vazio pra usar a padrão dele">
+      <div id="svComissaoPreview" class="card-2 p-2 text-sm hide"></div>
       <div>
         <label class="text-xs text-[var(--txt-dim)] block mb-1">Forma de pagamento</label>
         <select id="svPagamento" class="input">
@@ -1633,12 +1637,22 @@ function openLancarServico(){
     </div>`;
   document.getElementById('genericModal').classList.remove('hide');
 }
+function atualizarComissaoServicoPreview(){
+  const box = document.getElementById('svComissaoPreview');
+  const select = document.getElementById('svBarbeiro');
+  const opt = select.options[select.selectedIndex];
+  const pct = opt ? parseFloat(opt.dataset.pct)||0 : 0;
+  const valor = parseFloat(document.getElementById('svValor').value)||0;
+  if(!select.value){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  box.innerHTML = `<span class="text-[var(--txt-dim)]">Comissão cadastrada desse colaborador: ${pct}%</span>` +
+    (valor>0 ? ` <span class="text-[var(--ok)] font-semibold">→ ${fmtBRL(valor*pct/100)}</span>` : '');
+}
 async function confirmarLancarServico(){
   const nome = document.getElementById('svNome').value.trim();
   const valor = parseFloat(document.getElementById('svValor').value)||0;
   const barberId = document.getElementById('svBarbeiro').value;
   const barber = barbers.find(b=>b.id===barberId);
-  const pctDigitado = document.getElementById('svComissaoPct').value;
   const paymentMethod = document.getElementById('svPagamento').value;
   if(!nome){ toast('Informe o nome do serviço.', 'err'); return; }
   if(valor<=0){ toast('Informe o valor cobrado.', 'err'); return; }
@@ -1653,12 +1667,11 @@ async function confirmarLancarServico(){
       price: valor, durationMin: 0,
       date: todayStr(), time: hora,
       status: 'concluido', concluidoEm: firebase.firestore.FieldValue.serverTimestamp(),
-      commissionPctOverride: pctDigitado!=='' ? parseFloat(pctDigitado) : null,
       paymentMethod, source: 'balcao-servico',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     closeGenericModal();
-    toast('Serviço lançado! Comissão já contabilizada.');
+    toast(`Serviço lançado! Comissão de ${barber.commissionPct||0}% já contabilizada pra ${barber.name}.`);
   }catch(e){ toast('Erro ao lançar serviço.', 'err'); }
 }
 
@@ -2485,6 +2498,7 @@ function renderLucratividade(){
   filtroCategoriaEl.innerHTML = '<option value="">Todas as categorias</option>' + categoriasUnicas.map(c=>`<option value="${c}" ${categoriaAtual===c?'selected':''}>${CAT_LABELS[c]||capitalize(c)}</option>`).join('');
   const filtroProduto = filtroProdutoEl.value;
   const filtroCategoria = filtroCategoriaEl.value;
+  const buscaTexto = (document.getElementById('lucroBuscaProduto').value||'').trim().toLowerCase();
 
   const {startMs, endMs} = getLucroRangeMs();
   const pedidos = orders.filter(o=>{
@@ -2497,7 +2511,8 @@ function renderLucratividade(){
     (o.items||[]).forEach(it=>{
       const catalogRef = it.itemId ? catalogItems.find(c=>c.id===it.itemId) : null;
       const categoria = catalogRef?.category || null;
-      if(filtroProduto && it.name !== filtroProduto) return;
+      if(buscaTexto && !it.name.toLowerCase().includes(buscaTexto)) return;
+      if(!buscaTexto && filtroProduto && it.name !== filtroProduto) return;
       if(filtroCategoria && categoria !== filtroCategoria) return;
       const key = it.itemId || ('livre:'+it.name);
       if(!porProduto[key]) porProduto[key] = {name: it.name, itemId: it.itemId, categoria, qty:0, receita:0, custo:0};
