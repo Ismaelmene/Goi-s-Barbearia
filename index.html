@@ -308,10 +308,6 @@
       <h2 class="font-display text-3xl">CATÁLOGO</h2>
       <button onclick="openCatalogForm()" class="btn-gold px-3 py-2 rounded-xl text-xs"><i class="fa-solid fa-plus mr-1"></i>Novo</button>
     </div>
-    <button onclick="seedGoiasBarbearia()" id="seedBtn" class="card-2 w-full p-3 mb-3 text-sm text-left flex items-center justify-between">
-      <span><i class="fa-solid fa-download mr-2 text-[var(--gold)]"></i>Importar cardápio da Goiás Barbearia (1 clique)</span>
-      <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
-    </button>
     <button onclick="document.getElementById('nextImportFile').click()" class="card-2 w-full p-3 mb-4 text-sm text-left flex items-center justify-between">
       <span><i class="fa-solid fa-file-excel mr-2 text-[var(--ok)]"></i>Importar planilha do Next (.xls/.xlsx)</span>
       <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
@@ -2346,67 +2342,6 @@ async function saveCatalogItem(){
     list: firebase.firestore.FieldValue.arrayUnion(data.category)
   }, {merge:true});
   closeGenericModal(); toast('Item salvo!');
-}
-
-// ---------------- IMPORTAÇÃO RÁPIDA DO CARDÁPIO (Goiás Barbearia) ----------------
-// Valores e durações abaixo são SUGESTÕES iniciais — ajuste no painel (Serviços/Catálogo)
-// conforme a tabela real de preços da barbearia.
-const GOIAS_SERVICES_SEED = [
-  {name:'Corte Masculino', category:'cabelo', price:35, durationMin:40},
-  {name:'Corte Infantil', category:'cabelo', price:30, durationMin:30},
-  {name:'Corte Feminino', category:'cabelo', price:45, durationMin:45},
-  {name:'Corte na Tesoura', category:'cabelo', price:40, durationMin:45},
-  {name:'Desenho de Barba', category:'barba', price:20, durationMin:20},
-  {name:'Pigmentação da Barba', category:'barba', price:35, durationMin:30},
-  {name:'Pigmentação do Cabelo', category:'quimica', price:50, durationMin:60},
-  {name:'Sobrancelha (Cera, Pinça e Navalha)', category:'estetica', price:15, durationMin:15},
-  {name:'Relaxamento Capilar', category:'quimica', price:60, durationMin:60},
-  {name:'Selagem Capilar', category:'quimica', price:80, durationMin:90},
-  {name:'Hidratação com Ozônio', category:'quimica', price:45, durationMin:40},
-  {name:'Cronograma Capilar', category:'quimica', price:70, durationMin:60},
-  {name:'Platinado', category:'quimica', price:150, durationMin:120},
-  {name:'Luzes', category:'quimica', price:130, durationMin:120},
-  {name:'Coloração', category:'quimica', price:90, durationMin:90},
-  {name:'Progressiva Masculina', category:'quimica', price:100, durationMin:90},
-  {name:'Limpeza de Pele Facial', category:'estetica', price:50, durationMin:40},
-  {name:'Depilação de Nariz', category:'estetica', price:15, durationMin:10},
-  {name:'Depilação de Orelha', category:'estetica', price:15, durationMin:10},
-  {name:'Combo Corte + Barba', category:'combo', price:50, durationMin:60},
-];
-const GOIAS_CATALOG_SEED = [
-  {name:'Marmita Executiva', category:'jantinha', price:18, stock:20},
-  {name:'Espetinho de Carne', category:'espetinho', price:8, stock:30},
-  {name:'Espetinho de Frango', category:'espetinho', price:7, stock:30},
-  {name:'Refrigerante Lata', category:'bebida', price:6, stock:40},
-  {name:'Água Mineral', category:'bebida', price:4, stock:40},
-  {name:'Cerveja Long Neck', category:'bebida', price:9, stock:30},
-  {name:'Tereré Tradicional', category:'terere', price:10, stock:20},
-];
-async function seedGoiasBarbearia(){
-  if(!confirm('Isso vai importar o cardápio padrão da Goiás Barbearia (serviços e catálogo) para o Firestore. Pode ser executado mais de uma vez sem problema, mas o ideal é rodar só na primeira configuração. Continuar?')) return;
-  const btn = document.getElementById('seedBtn');
-  btn.disabled = true; btn.style.opacity = '0.5';
-  try{
-    const batch = db.batch();
-    GOIAS_SERVICES_SEED.forEach(s=>{
-      const ref = db.collection('services').doc();
-      batch.set(ref, {...s, active:true, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
-    });
-    GOIAS_CATALOG_SEED.forEach(i=>{
-      const ref = db.collection('catalogItems').doc();
-      batch.set(ref, {...i, nameLower: i.name.toLowerCase(), imageUrl:'', active:true, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
-    });
-    const categoriasUnicas = [...new Set(GOIAS_CATALOG_SEED.map(i=>i.category))];
-    batch.set(db.collection('settings').doc('catalogCategories'), {
-      list: firebase.firestore.FieldValue.arrayUnion(...categoriasUnicas)
-    }, {merge:true});
-    await batch.commit();
-    toast('Cardápio importado! Agora cadastre os barbeiros em Equipe.');
-  }catch(e){
-    toast('Erro ao importar. Confira o firebaseConfig.', 'err');
-  } finally {
-    btn.disabled = false; btn.style.opacity = '1';
-  }
 }
 
 // ---------------- IMPORTAÇÃO EM MASSA — PLANILHA DO NEXT (.xls/.xlsx) ----------------
