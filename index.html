@@ -1368,8 +1368,14 @@ function calcularVendasPorPagamento(){
     const t = o.entregueEm?.toDate ? o.entregueEm.toDate().getTime() : (o.createdAt?.toDate ? o.createdAt.toDate().getTime() : 0);
     return t >= aberturaMs;
   }).forEach(o=>{
-    const metodo = o.paymentMethod || 'dinheiro';
-    porPagamento[metodo] = (porPagamento[metodo]||0) + (o.total||0);
+    if(o.paymentSplit && o.paymentSplit.length>0){
+      o.paymentSplit.forEach(p=>{
+        porPagamento[p.method] = (porPagamento[p.method]||0) + (p.value||0);
+      });
+    } else {
+      const metodo = o.paymentMethod || 'dinheiro';
+      porPagamento[metodo] = (porPagamento[metodo]||0) + (o.total||0);
+    }
   });
   appointments.filter(a=>{
     if(a.status!=='concluido' || !a.paymentMethod) return false;
@@ -1694,7 +1700,6 @@ function openLancarVenda(){
   editingType = 'venda-manual';
   vendaCartTemp = [];
   document.getElementById('genericModalTitle').textContent = 'Lançar Venda (Balcão)';
-  const opcoesCatalogo = catalogItems.filter(i=>i.active!==false).map(i=>`<option value="${i.id}">${i.name} — ${fmtBRL(i.price)}</option>`).join('');
   const opcoesBarbeiro = barbers.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   document.getElementById('genericModalBody').innerHTML = `
     <div>
@@ -1704,17 +1709,24 @@ function openLancarVenda(){
           onkeypress="if(event.key==='Enter'){event.preventDefault(); adicionarPorCodigoBarras();}">
         <button type="button" onclick="abrirScannerCamera('vBarcode', ()=>adicionarPorCodigoBarras())" class="card-2 px-4 rounded-xl"><i class="fa-solid fa-camera"></i></button>
       </div>
-      <select id="vProduto" class="input mt-3" onchange="onVendaProdutoSelectChange()">
-        <option value="" disabled selected>Ou selecione o produto manualmente</option>
-        ${opcoesCatalogo}
-        <option value="__livre__">Outro item (digitar manualmente)</option>
-      </select>
-      <input id="vNomeLivre" class="input hide mt-2" placeholder="Nome do item">
-      <div class="grid grid-cols-2 gap-2 mt-2">
-        <input id="vQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
-        <input id="vPrecoUnit" type="number" step="0.01" class="input hide" placeholder="Preço unitário">
+
+      <label class="text-xs text-[var(--txt-dim)] block mb-1 mt-3">Ou busque o produto pelo nome</label>
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[var(--txt-dim)] text-sm"></i>
+        <input id="vBuscaProduto" class="input pl-9" placeholder="Digite pra buscar..." autocomplete="off"
+          oninput="buscarProdutoVenda(this.value)">
+        <div id="vBuscaResultados" class="hide absolute z-20 left-0 right-0 mt-1 card max-h-56 overflow-y-auto"></div>
       </div>
-      <button type="button" onclick="adicionarProdutoAoCarrinho()" class="card-2 w-full py-2 rounded-xl text-sm mt-2"><i class="fa-solid fa-plus mr-1"></i>Adicionar item à venda</button>
+
+      <div class="grid grid-cols-2 gap-2 mt-3">
+        <input id="vQtd" type="number" class="input" placeholder="Quantidade" value="1" min="1">
+        <button type="button" id="vAvulsoToggle" onclick="toggleItemAvulsoVenda()" class="card-2 rounded-xl text-xs">+ Item avulso (fora do catálogo)</button>
+      </div>
+      <div id="vAvulsoFields" class="hide space-y-2 mt-2">
+        <input id="vNomeLivre" class="input" placeholder="Nome do item">
+        <input id="vPrecoUnit" type="number" step="0.01" class="input" placeholder="Preço unitário">
+        <button type="button" onclick="adicionarItemAvulsoVenda()" class="btn-gold w-full py-2 rounded-xl text-sm">Adicionar item avulso</button>
+      </div>
 
       <div class="mt-4 pt-3 border-t border-[var(--line)]">
         <p class="text-xs text-[var(--txt-dim)] uppercase tracking-wide mb-2">Itens desta venda</p>
@@ -1736,6 +1748,30 @@ function openLancarVenda(){
           <option value="pix">Pix</option>
           <option value="outros">Outros</option>
         </select>
+        <button type="button" id="vSplitToggle" onclick="mostrarSplitPagamento('v')" class="text-xs text-[var(--gold)] mt-2">+ Dividir em 2 formas de pagamento</button>
+        <div id="vSplitFields" class="hide mt-2 space-y-2">
+          <div class="grid grid-cols-2 gap-2">
+            <select id="vPagamento1" class="input">
+              <option value="dinheiro">Dinheiro</option>
+              <option value="debito">Cartão de Débito</option>
+              <option value="credito">Cartão de Crédito</option>
+              <option value="pix" selected>Pix</option>
+              <option value="outros">Outros</option>
+            </select>
+            <input id="vValor1" type="number" step="0.01" class="input" placeholder="Valor (R$)" oninput="atualizarSplitPagamento('v')">
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <select id="vPagamento2" class="input">
+              <option value="dinheiro">Dinheiro</option>
+              <option value="debito" selected>Cartão de Débito</option>
+              <option value="credito">Cartão de Crédito</option>
+              <option value="pix">Pix</option>
+              <option value="outros">Outros</option>
+            </select>
+            <input id="vValor2" type="number" step="0.01" class="input" placeholder="Valor (R$)" readonly>
+          </div>
+          <p class="text-xs text-[var(--txt-dim)]">O segundo valor completa o total automaticamente.</p>
+        </div>
       </div>
       <div class="pt-3 mt-3 border-t border-[var(--line)]">
         <label class="text-xs text-[var(--txt-dim)] block mb-1">Comissão — barbeiro/colaborador cadastrado (opcional)</label>
@@ -1754,29 +1790,48 @@ function openLancarVenda(){
   document.getElementById('genericModal').classList.remove('hide');
   renderVendaCartList();
 }
-function onVendaProdutoSelectChange(){
-  const isLivre = document.getElementById('vProduto').value === '__livre__';
-  document.getElementById('vNomeLivre').classList.toggle('hide', !isLivre);
-  document.getElementById('vPrecoUnit').classList.toggle('hide', !isLivre);
-}
-function adicionarProdutoAoCarrinho(){
-  const produtoId = document.getElementById('vProduto').value;
-  const qtd = parseInt(document.getElementById('vQtd').value)||1;
-  let itemName, precoUnit, catalogRef = null;
-  if(produtoId==='__livre__'){
-    itemName = document.getElementById('vNomeLivre').value.trim();
-    precoUnit = parseFloat(document.getElementById('vPrecoUnit').value)||0;
-    if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return; }
+function buscarProdutoVenda(termo){
+  const box = document.getElementById('vBuscaResultados');
+  const t = termo.trim().toLowerCase();
+  if(!t){ box.classList.add('hide'); box.innerHTML=''; return; }
+  const resultados = catalogItems.filter(i=> i.active!==false && i.name.toLowerCase().includes(t)).slice(0,8);
+  if(resultados.length===0){
+    box.innerHTML = `<p class="text-xs text-[var(--txt-dim)] p-3">Nenhum produto encontrado.</p>`;
   } else {
-    const item = catalogItems.find(i=>i.id===produtoId);
-    if(!item){ toast('Selecione um produto.', 'err'); return; }
-    itemName = item.name; precoUnit = item.price; catalogRef = item;
+    box.innerHTML = resultados.map(i=>`
+      <button type="button" onclick="adicionarProdutoBuscaVenda('${i.id}')" class="w-full text-left p-2.5 text-sm border-b border-[var(--line)] last:border-0 flex justify-between items-center">
+        <span>${i.name}</span><span class="text-[var(--gold)] text-xs">${fmtBRL(i.price)}</span>
+      </button>`).join('');
   }
-  vendaCartTemp.push({itemId: catalogRef?.id||null, name: itemName, price: precoUnit, qty: qtd});
-  document.getElementById('vProduto').value = '';
-  document.getElementById('vNomeLivre').value = ''; document.getElementById('vNomeLivre').classList.add('hide');
-  document.getElementById('vPrecoUnit').value = ''; document.getElementById('vPrecoUnit').classList.add('hide');
+  box.classList.remove('hide');
+}
+function adicionarProdutoBuscaVenda(itemId){
+  const item = catalogItems.find(i=>i.id===itemId);
+  if(!item) return;
+  const qtd = parseInt(document.getElementById('vQtd').value)||1;
+  vendaCartTemp.push({itemId: item.id, name: item.name, price: item.price, qty: qtd});
+  document.getElementById('vBuscaProduto').value = '';
+  document.getElementById('vBuscaResultados').classList.add('hide');
   document.getElementById('vQtd').value = 1;
+  renderVendaCartList();
+  toast(`${item.name} adicionado!`);
+}
+function toggleItemAvulsoVenda(){
+  document.getElementById('vAvulsoFields').classList.remove('hide');
+  document.getElementById('vAvulsoToggle').classList.add('hide');
+  document.getElementById('vNomeLivre').focus();
+}
+function adicionarItemAvulsoVenda(){
+  const itemName = document.getElementById('vNomeLivre').value.trim();
+  const precoUnit = parseFloat(document.getElementById('vPrecoUnit').value)||0;
+  const qtd = parseInt(document.getElementById('vQtd').value)||1;
+  if(!itemName || precoUnit<=0){ toast('Preencha o nome e o preço do item.', 'err'); return; }
+  vendaCartTemp.push({itemId: null, name: itemName, price: precoUnit, qty: qtd});
+  document.getElementById('vNomeLivre').value = '';
+  document.getElementById('vPrecoUnit').value = '';
+  document.getElementById('vQtd').value = 1;
+  document.getElementById('vAvulsoFields').classList.add('hide');
+  document.getElementById('vAvulsoToggle').classList.remove('hide');
   renderVendaCartList();
   toast(`${itemName} adicionado!`);
 }
@@ -1786,8 +1841,10 @@ function adicionarPorCodigoBarras(){
   if(!code) return;
   const item = catalogItems.find(i => i.barcode && i.barcode === code);
   if(!item){ toast('Nenhum produto encontrado com esse código de barras.', 'err'); input.select(); return; }
-  vendaCartTemp.push({itemId: item.id, name: item.name, price: item.price, qty: 1});
+  const qtd = parseInt(document.getElementById('vQtd').value)||1;
+  vendaCartTemp.push({itemId: item.id, name: item.name, price: item.price, qty: qtd});
   input.value = '';
+  document.getElementById('vQtd').value = 1;
   renderVendaCartList();
   toast(`${item.name} adicionado!`);
 }
@@ -1817,17 +1874,43 @@ function mostrarDescontoVenda(){
   document.getElementById('vDescontoToggle').classList.add('hide');
   document.getElementById('vDesconto').focus();
 }
+function mostrarSplitPagamento(prefix){
+  document.getElementById(prefix+'SplitFields').classList.remove('hide');
+  document.getElementById(prefix+'SplitToggle').classList.add('hide');
+  document.getElementById(prefix+'Pagamento').classList.add('hide');
+  atualizarSplitPagamento(prefix);
+}
+function atualizarSplitPagamento(prefix){
+  const totalEl = document.getElementById(prefix+'TotalDisplay');
+  if(!totalEl) return;
+  const total = parseFloat(totalEl.textContent.replace(/[^\d,.-]/g,'').replace(',','.'))||0;
+  const valor1 = parseFloat(document.getElementById(prefix+'Valor1')?.value)||0;
+  const valor2 = Math.max(0, total - valor1);
+  const valor2El = document.getElementById(prefix+'Valor2');
+  if(valor2El) valor2El.value = valor2.toFixed(2);
+}
 function atualizarTotalCarrinho(){
   const subtotal = vendaCartTemp.reduce((s,it)=>s+it.price*it.qty,0);
   const desconto = parseFloat(document.getElementById('vDesconto')?.value)||0;
   const total = Math.max(0, subtotal-desconto);
   const el = document.getElementById('vTotalDisplay');
   if(el) el.textContent = fmtBRL(total);
+  if(!document.getElementById('vSplitFields')?.classList.contains('hide')) atualizarSplitPagamento('v');
 }
 async function confirmarVendaManual(){
   if(vendaCartTemp.length===0){ toast('Adicione pelo menos um item à venda.', 'err'); return; }
   const desconto = parseFloat(document.getElementById('vDesconto').value)||0;
-  const paymentMethod = document.getElementById('vPagamento').value;
+  const splitAtivo = !document.getElementById('vSplitFields').classList.contains('hide');
+  let paymentMethod, paymentSplit = null;
+  if(splitAtivo){
+    const m1 = document.getElementById('vPagamento1').value, v1 = parseFloat(document.getElementById('vValor1').value)||0;
+    const m2 = document.getElementById('vPagamento2').value, v2 = parseFloat(document.getElementById('vValor2').value)||0;
+    if(v1<=0){ toast('Informe o valor da primeira forma de pagamento.', 'err'); return; }
+    paymentSplit = [{method:m1, value:v1}, {method:m2, value:v2}];
+    paymentMethod = m1; // mantém compatibilidade com relatórios antigos (usa a primeira forma como principal)
+  } else {
+    paymentMethod = document.getElementById('vPagamento').value;
+  }
   const barberId = document.getElementById('vBarbeiro').value;
   const barberRef = barberId ? barbers.find(b=>b.id===barberId) : null;
   const pctDigitado = parseFloat(document.getElementById('vComissaoPct').value)||0;
@@ -1854,7 +1937,7 @@ async function confirmarVendaManual(){
   try{
     await db.collection('orders').add({
       clientId: null, clientName: 'Venda balcão', clientPhone: '',
-      items, total, desconto, paymentMethod, status:'entregue', source:'balcao',
+      items, total, desconto, paymentMethod, paymentSplit, status:'entregue', source:'balcao',
       barberId: barberRef?.id || null, barberName: barberRef?.name || null,
       comissaoPct, comissaoValor: comissaoTotal,
       entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
@@ -3010,10 +3093,13 @@ async function confirmarAdicionarItemMesa(){
   }catch(e){ toast('Erro ao adicionar item.', 'err'); }
 }
 function fecharMesaPrompt(mesaId){
+  const mesa = mesasAbertas.find(m=>m.id===mesaId);
+  const total = mesa ? (mesa.itens||[]).reduce((s,it)=>s+(it.price*it.qty),0) : 0;
   editingType = 'fechar-mesa'; editingId = mesaId;
   document.getElementById('genericModalTitle').textContent = 'Fechar Mesa — Forma de pagamento';
   document.getElementById('genericModalBody').innerHTML = `
     <div class="space-y-3">
+      <div class="card-2 p-2 flex justify-between text-sm font-semibold"><span>Total da mesa</span><span id="mesaTotalDisplay">${fmtBRL(total)}</span></div>
       <select id="mesaPagamento" class="input">
         <option value="dinheiro">Dinheiro</option>
         <option value="debito">Cartão de Débito</option>
@@ -3021,6 +3107,30 @@ function fecharMesaPrompt(mesaId){
         <option value="pix">Pix</option>
         <option value="outros">Outros</option>
       </select>
+      <button type="button" id="mesaSplitToggle" onclick="mostrarSplitPagamento('mesa')" class="text-xs text-[var(--gold)]">+ Dividir em 2 formas de pagamento</button>
+      <div id="mesaSplitFields" class="hide space-y-2">
+        <div class="grid grid-cols-2 gap-2">
+          <select id="mesaPagamento1" class="input">
+            <option value="dinheiro">Dinheiro</option>
+            <option value="debito">Cartão de Débito</option>
+            <option value="credito">Cartão de Crédito</option>
+            <option value="pix" selected>Pix</option>
+            <option value="outros">Outros</option>
+          </select>
+          <input id="mesaValor1" type="number" step="0.01" class="input" placeholder="Valor (R$)" oninput="atualizarSplitPagamento('mesa')">
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <select id="mesaPagamento2" class="input">
+            <option value="dinheiro">Dinheiro</option>
+            <option value="debito" selected>Cartão de Débito</option>
+            <option value="credito">Cartão de Crédito</option>
+            <option value="pix">Pix</option>
+            <option value="outros">Outros</option>
+          </select>
+          <input id="mesaValor2" type="number" step="0.01" class="input" placeholder="Valor (R$)" readonly>
+        </div>
+        <p class="text-xs text-[var(--txt-dim)]">O segundo valor completa o total automaticamente.</p>
+      </div>
       <button onclick="fecharMesa('${mesaId}')" class="btn-gold w-full py-3 rounded-xl mt-2">Confirmar Fechamento</button>
     </div>`;
   document.getElementById('genericModal').classList.remove('hide');
@@ -3028,15 +3138,25 @@ function fecharMesaPrompt(mesaId){
 async function fecharMesa(mesaId){
   const mesa = mesasAbertas.find(m=>m.id===mesaId);
   if(!mesa) return;
-  const paymentMethod = document.getElementById('mesaPagamento')?.value || 'dinheiro';
   const total = (mesa.itens||[]).reduce((s,it)=>s+(it.price*it.qty),0);
+  const splitAtivo = !document.getElementById('mesaSplitFields').classList.contains('hide');
+  let paymentMethod, paymentSplit = null;
+  if(splitAtivo){
+    const m1 = document.getElementById('mesaPagamento1').value, v1 = parseFloat(document.getElementById('mesaValor1').value)||0;
+    const m2 = document.getElementById('mesaPagamento2').value, v2 = parseFloat(document.getElementById('mesaValor2').value)||0;
+    if(v1<=0){ toast('Informe o valor da primeira forma de pagamento.', 'err'); return; }
+    paymentSplit = [{method:m1, value:v1}, {method:m2, value:v2}];
+    paymentMethod = m1;
+  } else {
+    paymentMethod = document.getElementById('mesaPagamento')?.value || 'dinheiro';
+  }
   try{
     if(total > 0){
       await db.collection('orders').add({
         clientId: null, clientName: `Mesa: ${mesa.nome}`,
         clientPhone: '',
         items: mesa.itens||[],
-        total, paymentMethod, status:'entregue', source:'mesa',
+        total, paymentMethod, paymentSplit, status:'entregue', source:'mesa',
         entregueEm: firebase.firestore.FieldValue.serverTimestamp(),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
