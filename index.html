@@ -313,6 +313,10 @@
       <i class="fa-solid fa-chevron-right text-xs text-[var(--txt-dim)]"></i>
     </button>
     <input type="file" id="nextImportFile" accept=".xls,.xlsx,.csv" class="hide" onchange="processarPlanilhaNext(this.files[0])">
+    <div class="relative mb-3">
+      <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[var(--txt-dim)] text-sm"></i>
+      <input id="adminCatalogSearchInput" class="input pl-9" placeholder="Buscar produto pelo nome..." oninput="renderAdminCatalog()">
+    </div>
     <div id="adminCatalogList" class="space-y-2"></div>
   </section>
 
@@ -2226,13 +2230,16 @@ async function saveBarber(){
 function renderAdminCatalog(){
   const box = document.getElementById('adminCatalogList');
   if(catalogItems.length===0){ box.innerHTML = `<p class="text-sm text-[var(--txt-dim)]">Nenhum item cadastrado.</p>`; return; }
+  const busca = (document.getElementById('adminCatalogSearchInput')?.value||'').trim().toLowerCase();
+  const itensFiltrados = busca ? catalogItems.filter(i=> i.name.toLowerCase().includes(busca)) : catalogItems;
   const lowStockCount = catalogItems.filter(i=> i.active!==false && i.stockMin>0 && (i.stock??0) <= i.stockMin).length;
-  const alertBox = lowStockCount>0 ? `
+  const alertBox = (lowStockCount>0 && !busca) ? `
     <div class="card-2 border border-[var(--warn)] p-3 mb-3 text-sm flex items-center gap-2">
       <i class="fa-solid fa-triangle-exclamation text-[var(--warn)]"></i>
       <span>${lowStockCount} item(s) no estoque mínimo ou abaixo — reponha logo.</span>
     </div>` : '';
-  box.innerHTML = alertBox + catalogItems.map(i=>{
+  if(itensFiltrados.length===0){ box.innerHTML = alertBox + `<p class="text-sm text-[var(--txt-dim)]">Nenhum produto encontrado pra "${busca}".</p>`; return; }
+  box.innerHTML = alertBox + itensFiltrados.map(i=>{
     const lowStock = i.stockMin>0 && (i.stock??0) <= i.stockMin;
     return `
     <div class="card p-3 flex items-center justify-between">
