@@ -2720,7 +2720,14 @@ function renderComissoes(){
       <details class="mb-2">
         <summary class="text-xs text-[var(--txt-dim)] cursor-pointer mb-1">Vales do período (${valesPeriodo.length})</summary>
         <div class="space-y-1 mt-2">
-          ${valesPeriodo.map(v=>`<div class="flex justify-between text-xs card-2 p-2"><span>${v.data||''} ${v.motivo?'· '+v.motivo:''}</span><span class="text-[var(--danger)]">${fmtBRL(v.valor)}</span></div>`).join('')}
+          ${valesPeriodo.map(v=>`
+            <div class="flex justify-between items-center text-xs card-2 p-2">
+              <span>${v.data||''} ${v.motivo?'· '+v.motivo:''}</span>
+              <div class="flex items-center gap-2">
+                <span class="text-[var(--danger)]">${fmtBRL(v.valor)}</span>
+                <button onclick="editarVale('${v.id}')" class="text-[var(--txt-dim)]"><i class="fa-solid fa-pen text-[10px]"></i></button>
+              </div>
+            </div>`).join('')}
         </div>
       </details>` : ''}
       ${linhas.length>0 ? `
@@ -2770,6 +2777,36 @@ async function confirmarVale(barberId, barberName){
   });
   closeGenericModal();
   toast('Vale registrado!');
+}
+function editarVale(valeId){
+  const vale = vales.find(v=>v.id===valeId);
+  if(!vale) return;
+  editingType = 'editar-vale'; editingId = valeId;
+  document.getElementById('genericModalTitle').textContent = `Corrigir Vale — ${vale.barberName}`;
+  document.getElementById('genericModalBody').innerHTML = `
+    <div class="space-y-3">
+      <input id="valeValorEdit" type="number" step="0.01" class="input" placeholder="Valor do vale (R$)" value="${vale.valor}">
+      <input id="valeMotivoEdit" class="input" placeholder="Motivo (opcional)" value="${vale.motivo||''}">
+      <input id="valeDataEdit" type="date" class="input" value="${vale.data||todayStr()}">
+      <button onclick="salvarEdicaoVale('${valeId}')" class="btn-gold w-full py-3 rounded-xl mt-2">Salvar Correção</button>
+      <button onclick="excluirVale('${valeId}')" class="w-full py-3 rounded-xl text-sm border border-[var(--danger)] text-[var(--danger)]">Excluir Vale</button>
+    </div>`;
+  document.getElementById('genericModal').classList.remove('hide');
+}
+async function salvarEdicaoVale(valeId){
+  const valor = parseFloat(document.getElementById('valeValorEdit').value)||0;
+  const motivo = document.getElementById('valeMotivoEdit').value.trim();
+  const data = document.getElementById('valeDataEdit').value || todayStr();
+  if(valor<=0){ toast('Informe o valor do vale.', 'err'); return; }
+  await db.collection('vales').doc(valeId).update({valor, motivo, data});
+  closeGenericModal();
+  toast('Vale corrigido!');
+}
+async function excluirVale(valeId){
+  if(!confirm('Tem certeza que deseja excluir esse vale?')) return;
+  await db.collection('vales').doc(valeId).delete();
+  closeGenericModal();
+  toast('Vale excluído!');
 }
 
 // ---------------- LUCRATIVIDADE (custo x venda por produto) ----------------
